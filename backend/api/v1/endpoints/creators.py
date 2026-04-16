@@ -82,7 +82,7 @@ async def creator_latest_result(creator_id: int):
 
 
 @router.post("/{creator_id}/evaluate")
-async def evaluate_creator(creator_id: int):
+def evaluate_creator(creator_id: int):
     """특정 크리에이터를 즉시 평가한다."""
     creator = get_creator(creator_id)
     if not creator:
