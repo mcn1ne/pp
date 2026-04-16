@@ -36,22 +36,31 @@ def analyze_comments(comments: list[str], channel_name: str) -> SentimentSummary
         results = list(
             executor.map(lambda b: _analyze_batch(b, channel_name), batches)
         )
-    batch_results = [r for r in results if r]
 
-    if not batch_results:
+    # 실패한 배치는 제외하되, 가중치 계산을 위해 원본 배치 크기와 짝을 맞춰 유지
+    paired = [
+        (r, len(batch))
+        for r, batch in zip(results, batches)
+        if r is not None
+    ]
+
+    if not paired:
         return SentimentSummary(
             positive_ratio=0, negative_ratio=0, neutral_ratio=0,
             key_themes=[], notable_comments=[], overall_sentiment="분석 실패",
             analyzed_count=len(comments),
         )
 
-    # 배치 결과 합산 (가중 평균)
-    total_batches = len(batch_results)
-    avg_positive = sum(r.get("positive_ratio", 0) for r in batch_results) / total_batches
-    avg_negative = sum(r.get("negative_ratio", 0) for r in batch_results) / total_batches
-    avg_neutral = sum(r.get("neutral_ratio", 0) for r in batch_results) / total_batches
+    batch_results = [r for r, _ in paired]
 
-    # 비율 합이 1.0이 되도록 정규화
+    # 댓글 수를 가중치로 한 가중 평균.
+    # 성공한 배치들의 댓글 수 합이 분모이므로 실패 배치는 자연스럽게 제외된다.
+    total_weight = sum(w for _, w in paired)
+    avg_positive = sum(r.get("positive_ratio", 0) * w for r, w in paired) / total_weight
+    avg_negative = sum(r.get("negative_ratio", 0) * w for r, w in paired) / total_weight
+    avg_neutral = sum(r.get("neutral_ratio", 0) * w for r, w in paired) / total_weight
+
+    # 비율 합이 1.0이 되도록 정규화 (Gemini 응답이 정확히 1이 아닐 때 보정)
     total = avg_positive + avg_negative + avg_neutral
     if total > 0:
         avg_positive /= total
