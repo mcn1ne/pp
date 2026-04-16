@@ -1,5 +1,8 @@
 import json
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor
+
 from google import genai
 from backend.config import settings
 from backend.schemas.sentiment import SentimentSummary, NotableComment
@@ -10,10 +13,12 @@ def _get_client():
 
 
 BATCH_SIZE = 100  # 배치당 댓글 수
+# 배치 동시 처리 수 (Gemini RPM 한도에 따라 조정). 환경변수로 덮어쓰기 가능.
+BATCH_CONCURRENCY = max(1, int(os.environ.get("GEMINI_BATCH_CONCURRENCY", "3")))
 
 
 def analyze_comments(comments: list[str], channel_name: str) -> SentimentSummary:
-    """Gemini API로 댓글 감성분석을 수행한다. 댓글이 많으면 배치로 나눠서 분석."""
+    """Gemini API로 댓글 감성분석을 수행한다. 댓글이 많으면 배치로 나눠 병렬 분석."""
     if not comments:
         return SentimentSummary(
             positive_ratio=0, negative_ratio=0, neutral_ratio=0,
@@ -23,12 +28,15 @@ def analyze_comments(comments: list[str], channel_name: str) -> SentimentSummary
 
     # 배치로 분할
     batches = [comments[i:i + BATCH_SIZE] for i in range(0, len(comments), BATCH_SIZE)]
-    batch_results = []
 
-    for batch in batches:
-        result = _analyze_batch(batch, channel_name)
-        if result:
-            batch_results.append(result)
+    # 배치별 Gemini 호출을 ThreadPoolExecutor로 병렬 처리
+    # (google-genai SDK가 동기라 I/O bound 작업에는 쓰레드풀이 효과적)
+    workers = min(BATCH_CONCURRENCY, len(batches))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        results = list(
+            executor.map(lambda b: _analyze_batch(b, channel_name), batches)
+        )
+    batch_results = [r for r in results if r]
 
     if not batch_results:
         return SentimentSummary(
