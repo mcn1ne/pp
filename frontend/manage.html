@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>크리에이터 관리 - 슈퍼센트</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    <script>
+        tailwind.config = {
+            theme: { extend: { fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] } } }
+        }
+    </script>
+    <style>
+        .fade-in { animation: fadeIn 0.3s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+        /* 모달 스크롤 */
+        .modal-backdrop { background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(2px); }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+    <!-- 헤더 -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white font-bold text-lg">S</span>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">크리에이터 관리</h1>
+                    <p class="text-xs text-gray-500">등록된 파트너 크리에이터 목록 및 스케줄 관리</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/" class="px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition">개별 분석</a>
+                <button id="eval-all-btn" onclick="evaluateAll()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">전체 평가 실행</button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 py-8 space-y-6">
+
+        <!-- 전체 평가 진행률 -->
+        <section id="bulk-progress" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div class="flex items-center justify-between mb-2">
+                <p class="text-sm font-medium text-gray-700" id="bulk-progress-label">평가 진행 중...</p>
+                <p class="text-xs text-gray-500" id="bulk-progress-count">0 / 0</p>
+            </div>
+            <div class="w-full bg-gray-200 rounded-full h-2">
+                <div id="bulk-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+            </div>
+            <p id="bulk-progress-failed" class="hidden mt-2 text-xs text-red-600"></p>
+        </section>
+
+        <!-- 크리에이터 추가 -->
+        <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 class="text-lg font-bold text-gray-900 mb-4">크리에이터 등록</h2>
+            <div class="flex gap-3">
+                <input type="text" id="new-url" placeholder="YouTube 채널 URL (예: https://youtube.com/@channelname)"
+                    class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm">
+                <label class="flex items-center gap-2 px-3">
+                    <input type="checkbox" id="new-filter" checked class="w-4 h-4 text-blue-600 rounded">
+                    <span class="text-sm text-gray-600 whitespace-nowrap">SC 필터</span>
+                </label>
+                <button onclick="addCreator()" class="px-6 py-3 bg-green-600 text-white font-medium rounded-lg hover:bg-green-700 transition whitespace-nowrap">등록</button>
+            </div>
+            <div id="add-error" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"></div>
+        </section>
+
+        <!-- 스케줄 설정 -->
+        <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 class="text-lg font-bold text-gray-900 mb-4">자동 평가 스케줄</h2>
+            <div class="flex items-center gap-4 flex-wrap">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="schedule-enabled" class="sr-only peer">
+                    <div class="w-9 h-5 bg-gray-300 rounded-full peer peer-checked:bg-indigo-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
+                </label>
+                <span class="text-sm text-gray-600">스케줄 활성화</span>
+                <select id="schedule-preset" class="px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    <option value="0 9 * * *">매일 09:00</option>
+                    <option value="0 9 * * 1">매주 월요일 09:00</option>
+                    <option value="0 9 1 * *">매월 1일 09:00</option>
+                    <option value="0 */6 * * *">6시간마다</option>
+                    <option value="0 */12 * * *">12시간마다</option>
+                    <option value="custom">직접 입력 (cron)</option>
+                </select>
+                <input type="text" id="schedule-custom" placeholder="분 시 일 월 요일" class="hidden px-3 py-2 border border-gray-300 rounded-lg text-sm w-48">
+                <button onclick="saveSchedule()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">저장</button>
+                <span id="schedule-last-run" class="text-xs text-gray-400 ml-auto"></span>
+            </div>
+        </section>
+
+        <!-- 크리에이터 목록 -->
+        <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-bold text-gray-900">등록된 크리에이터 <span id="creator-count" class="text-gray-400 font-normal text-sm"></span></h2>
+                <button onclick="loadCreators()" class="text-sm text-gray-500 hover:text-gray-700">새로고침</button>
+            </div>
+            <div id="creator-list" class="space-y-3">
+                <p class="text-gray-400 text-sm text-center py-8">로딩 중...</p>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 상세 결과 모달 -->
+    <div id="detail-modal" class="hidden fixed inset-0 z-50 modal-backdrop overflow-y-auto">
+        <div class="min-h-screen flex items-start justify-center p-4 sm:p-6">
+            <div class="bg-gray-50 w-full max-w-5xl rounded-2xl shadow-2xl fade-in">
+                <!-- 모달 헤더 -->
+                <div class="sticky top-0 z-10 bg-white border-b border-gray-200 rounded-t-2xl px-6 py-4 flex items-center justify-between">
+                    <div>
+                        <h2 class="text-lg font-bold text-gray-900" id="detail-title">평가 상세 결과</h2>
+                        <p class="text-xs text-gray-500" id="detail-subtitle"></p>
+                    </div>
+                    <button onclick="closeDetail()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
+                </div>
+
+                <!-- 로딩 -->
+                <div id="detail-loading" class="hidden p-12 text-center">
+                    <div class="animate-spin h-10 w-10 border-4 border-blue-200 border-t-blue-600 rounded-full mx-auto mb-3"></div>
+                    <p class="text-sm text-gray-500">평가 결과를 불러오는 중...</p>
+                </div>
+
+                <!-- 오류 -->
+                <div id="detail-error" class="hidden m-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"></div>
+
+                <!-- 결과 대시보드 (index.html과 동일한 구조) -->
+                <div id="detail-body" class="hidden p-6 space-y-6">
+
+                    <!-- 추천 카드 -->
+                    <section id="recommendation-card" class="rounded-xl shadow-sm border p-6">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-4">
+                                <div id="rec-badge" class="px-5 py-2 rounded-full text-lg font-bold"></div>
+                                <div>
+                                    <h3 class="text-lg font-bold text-gray-900">파트너십 추천 결과</h3>
+                                    <p class="text-sm text-gray-500">종합 점수: <span id="rec-score" class="font-semibold"></span>/100</p>
+                                </div>
+                            </div>
+                            <div class="text-right text-xs text-gray-400" id="rec-date"></div>
+                        </div>
+                        <p id="rec-summary" class="mt-4 text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-4"></p>
+                    </section>
+
+                    <!-- 채널 개요 -->
+                    <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h2 class="text-lg font-bold text-gray-900 mb-4">채널 개요</h2>
+                        <div class="flex items-start gap-6">
+                            <img id="ch-thumbnail" class="w-20 h-20 rounded-full object-cover" src="" alt="">
+                            <div class="flex-1">
+                                <h3 id="ch-title" class="text-xl font-bold text-gray-900"></h3>
+                                <p id="ch-custom-url" class="text-sm text-gray-500 mb-3"></p>
+                                <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                                    <div class="bg-blue-50 rounded-lg p-3 text-center">
+                                        <p class="text-xs text-blue-600 font-medium">구독자</p>
+                                        <p id="ch-subscribers" class="text-lg font-bold text-blue-700"></p>
+                                    </div>
+                                    <div class="bg-green-50 rounded-lg p-3 text-center">
+                                        <p class="text-xs text-green-600 font-medium">총 조회수</p>
+                                        <p id="ch-views" class="text-lg font-bold text-green-700"></p>
+                                    </div>
+                                    <div class="bg-purple-50 rounded-lg p-3 text-center">
+                                        <p class="text-xs text-purple-600 font-medium">영상 수</p>
+                                        <p id="ch-videos" class="text-lg font-bold text-purple-700"></p>
+                                    </div>
+                                    <div class="bg-orange-50 rounded-lg p-3 text-center">
+                                        <p class="text-xs text-orange-600 font-medium">가입일</p>
+                                        <p id="ch-joined" class="text-sm font-bold text-orange-700"></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- 슈퍼센트 필터 정보 -->
+                    <section id="supercent-info" class="rounded-xl shadow-sm border p-4">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-3">
+                                <div class="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center">
+                                    <span class="text-indigo-600 font-bold text-sm">SC</span>
+                                </div>
+                                <div>
+                                    <p class="text-sm font-semibold text-gray-800">슈퍼센트 관련 영상: <span id="sc-video-count" class="text-indigo-600"></span> / 전체 <span id="sc-total-videos" class="text-gray-500"></span>개</p>
+                                    <p class="text-xs text-gray-500">분석된 댓글: <span id="sc-comment-count" class="font-medium text-gray-700"></span>개</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div id="sc-warning" class="hidden mt-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm"></div>
+                    </section>
+
+                    <!-- 차트 그리드 -->
+                    <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-3">최근 영상 조회수</h3>
+                            <canvas id="chart-views" height="200"></canvas>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-3">댓글 감성 분포</h3>
+                            <canvas id="chart-sentiment" height="200"></canvas>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-3">영상별 참여율 (%)</h3>
+                            <canvas id="chart-engagement" height="200"></canvas>
+                        </div>
+                        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                            <h3 class="text-sm font-semibold text-gray-700 mb-3">항목별 점수</h3>
+                            <canvas id="chart-scores" height="200"></canvas>
+                        </div>
+                    </section>
+
+                    <!-- 댓글 분석 -->
+                    <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h2 class="text-lg font-bold text-gray-900 mb-4">댓글 감성분석 결과</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                            <div class="text-center p-4 bg-green-50 rounded-lg">
+                                <p class="text-3xl font-bold text-green-600" id="sent-positive"></p>
+                                <p class="text-xs text-green-700">긍정</p>
+                            </div>
+                            <div class="text-center p-4 bg-gray-100 rounded-lg">
+                                <p class="text-3xl font-bold text-gray-600" id="sent-neutral"></p>
+                                <p class="text-xs text-gray-700">중립</p>
+                            </div>
+                            <div class="text-center p-4 bg-red-50 rounded-lg">
+                                <p class="text-3xl font-bold text-red-600" id="sent-negative"></p>
+                                <p class="text-xs text-red-700">부정</p>
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <h4 class="text-sm font-semibold text-gray-700 mb-2">핵심 테마</h4>
+                            <div id="themes-container" class="flex flex-wrap gap-2"></div>
+                        </div>
+                        <div>
+                            <h4 class="text-sm font-semibold text-gray-700 mb-2">주목할 댓글 (감정별)</h4>
+                            <ul id="quotes-list" class="space-y-2"></ul>
+                        </div>
+                        <p class="mt-3 text-sm text-gray-500">전체 감성: <span id="sent-overall" class="font-medium text-gray-700"></span></p>
+                        <p class="text-xs text-gray-400">분석된 댓글 수: <span id="sent-count"></span>개</p>
+                    </section>
+
+                    <!-- 점수 상세 -->
+                    <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                        <h2 class="text-lg font-bold text-gray-900 mb-4">종합 점수 상세</h2>
+                        <div class="flex items-center gap-8">
+                            <div class="text-center">
+                                <div id="composite-score-circle" class="w-28 h-28 rounded-full border-8 flex items-center justify-center mx-auto">
+                                    <span id="composite-score-text" class="text-3xl font-bold"></span>
+                                </div>
+                                <p class="text-sm text-gray-500 mt-2">종합 점수</p>
+                            </div>
+                            <div class="flex-1 space-y-3" id="score-bars"></div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/charts.js"></script>
+    <script src="/js/ui.js"></script>
+    <script>
+    // 현재 로드된 크리에이터 캐시 (중복 URL 사전 검사용)
+    let creatorsCache = [];
+
+    // --- 크리에이터 CRUD ---
+
+    async function loadCreators() {
+        const res = await fetch('/api/v1/creators');
+        const creators = await res.json();
+        creatorsCache = creators;
+
+        const list = document.getElementById('creator-list');
+        document.getElementById('creator-count').textContent = `(${creators.length}명)`;
+
+        if (creators.length === 0) {
+            list.innerHTML = '<p class="text-gray-400 text-sm text-center py-8">등록된 크리에이터가 없습니다.</p>';
+            return;
+        }
+
+        list.innerHTML = creators.map(c => {
+            const recColor = { PASS: 'bg-green-500', REVIEW: 'bg-yellow-500', FAIL: 'bg-red-500' };
+            const badge = c.last_recommendation
+                ? `<span class="${recColor[c.last_recommendation] || 'bg-gray-400'} text-white text-xs font-bold px-2 py-0.5 rounded-full">${c.last_recommendation}</span>`
+                : '<span class="bg-gray-300 text-gray-600 text-xs px-2 py-0.5 rounded-full">미평가</span>';
+
+            const score = c.last_score !== null ? `${c.last_score.toFixed(1)}점` : '-';
+            const evalDate = c.last_evaluated_at ? new Date(c.last_evaluated_at).toLocaleString('ko-KR') : '없음';
+            const thumb = c.thumbnail_url
+                ? `<img src="${c.thumbnail_url}" class="w-12 h-12 rounded-full object-cover">`
+                : `<div class="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center text-gray-400 text-lg font-bold">?</div>`;
+            const name = c.channel_name || c.url;
+            const subs = c.subscriber_count ? formatNum(c.subscriber_count) : '-';
+
+            const detailBtn = c.last_evaluated_at
+                ? `<button onclick="openDetail(${c.id})" class="px-3 py-1.5 text-xs bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition">상세보기</button>`
+                : '';
+
+            return `
+            <div class="flex items-center gap-4 p-4 border border-gray-100 rounded-lg hover:bg-gray-50 transition fade-in">
+                ${thumb}
+                <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2">
+                        <p class="font-semibold text-gray-900 truncate">${escapeHtml(name)}</p>
+                        ${badge}
+                    </div>
+                    <p class="text-xs text-gray-500 truncate">${escapeHtml(c.url)}</p>
+                    <p class="text-xs text-gray-400 mt-1">구독자 ${subs} · 점수 ${score} · 마지막 평가: ${evalDate}</p>
+                    ${c.last_ai_summary ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2">${escapeHtml(c.last_ai_summary)}</p>` : ''}
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                    ${detailBtn}
+                    <button onclick="evaluateOne(${c.id}, this)" class="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition">평가</button>
+                    <button onclick="deleteCreator(${c.id})" class="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition">삭제</button>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    async function addCreator() {
+        const urlInput = document.getElementById('new-url');
+        const url = urlInput.value.trim();
+        const filter = document.getElementById('new-filter').checked;
+        const errorEl = document.getElementById('add-error');
+        errorEl.classList.add('hidden');
+
+        if (!url) { showAddError('URL을 입력해주세요.'); return; }
+
+        // 서버 왕복 전에 중복 URL을 미리 걸러 409를 방지
+        if (creatorsCache.some(c => c.url === url)) {
+            showAddError('이미 등록된 URL입니다.');
+            return;
+        }
+
+        try {
+            const res = await fetch('/api/v1/creators', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url, supercent_filter: filter }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `등록 실패 (${res.status})`);
+            }
+            urlInput.value = '';
+            loadCreators();
+        } catch (e) { showAddError(e.message); }
+    }
+
+    async function deleteCreator(id) {
+        if (!confirm('이 크리에이터를 삭제하시겠습니까?')) return;
+        await fetch(`/api/v1/creators/${id}`, { method: 'DELETE' });
+        loadCreators();
+    }
+
+    async function evaluateOne(id, btn) {
+        const original = btn.textContent;
+        btn.textContent = '평가 중...';
+        btn.disabled = true;
+        try {
+            const res = await fetch(`/api/v1/creators/${id}/evaluate`, { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `평가 실패 (${res.status})`);
+            }
+            loadCreators();
+        } catch (e) {
+            alert(e.message);
+        } finally {
+            btn.textContent = original;
+            btn.disabled = false;
+        }
+    }
+
+    async function evaluateAll() {
+        if (!confirm('등록된 모든 크리에이터를 평가합니다. 진행하시겠습니까?')) return;
+
+        const btn = document.getElementById('eval-all-btn');
+        btn.textContent = '실행 중...';
+        btn.disabled = true;
+
+        const progress = document.getElementById('bulk-progress');
+        const bar = document.getElementById('bulk-progress-bar');
+        const countLabel = document.getElementById('bulk-progress-count');
+        const failedLabel = document.getElementById('bulk-progress-failed');
+        const label = document.getElementById('bulk-progress-label');
+
+        progress.classList.remove('hidden');
+        failedLabel.classList.add('hidden');
+        failedLabel.textContent = '';
+
+        const creators = creatorsCache.length
+            ? creatorsCache
+            : await fetch('/api/v1/creators').then(r => r.json());
+
+        let done = 0;
+        const failures = [];
+        countLabel.textContent = `0 / ${creators.length}`;
+        bar.style.width = '0%';
+
+        for (const c of creators) {
+            label.textContent = `평가 중: ${c.channel_name || c.url}`;
+            try {
+                const res = await fetch(`/api/v1/creators/${c.id}/evaluate`, { method: 'POST' });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    failures.push(`${c.channel_name || c.url} (${err.detail || res.status})`);
+                }
+            } catch (e) {
+                failures.push(`${c.channel_name || c.url} (${e.message})`);
+            }
+            done++;
+            countLabel.textContent = `${done} / ${creators.length}`;
+            bar.style.width = (done / creators.length * 100) + '%';
+        }
+
+        label.textContent = failures.length
+            ? `완료 (실패 ${failures.length}건)`
+            : '전체 평가 완료';
+
+        if (failures.length) {
+            failedLabel.classList.remove('hidden');
+            failedLabel.textContent = '실패: ' + failures.join(' / ');
+        }
+
+        btn.textContent = '전체 평가 실행';
+        btn.disabled = false;
+        loadCreators();
+    }
+
+    // --- 상세 보기 모달 ---
+
+    async function openDetail(id) {
+        const modal = document.getElementById('detail-modal');
+        const loading = document.getElementById('detail-loading');
+        const body = document.getElementById('detail-body');
+        const errorEl = document.getElementById('detail-error');
+
+        modal.classList.remove('hidden');
+        loading.classList.remove('hidden');
+        body.classList.add('hidden');
+        errorEl.classList.add('hidden');
+        document.body.style.overflow = 'hidden';
+
+        try {
+            const res = await fetch(`/api/v1/creators/${id}/latest-result`);
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `결과를 불러오지 못했습니다 (${res.status})`);
+            }
+            const data = await res.json();
+
+            // 구 스키마(요약만 저장된 데이터)는 재평가해야 상세 조회 가능
+            if (!data.channel || !data.videos || !data.sentiment || !data.score_breakdown) {
+                throw new Error('이전 버전의 평가 데이터입니다. "평가" 버튼을 눌러 다시 실행해 주세요.');
+            }
+
+            document.getElementById('detail-title').textContent = data.channel?.title || '평가 상세 결과';
+            document.getElementById('detail-subtitle').textContent = data.evaluated_at
+                ? '평가 시점: ' + new Date(data.evaluated_at).toLocaleString('ko-KR')
+                : '';
+
+            // 이전 차트 제거 후 재렌더
+            destroyCharts();
+            renderRecommendation(data);
+            renderChannelInfo(data.channel);
+            renderSupercentInfo(data);
+            renderSentimentInfo(data.sentiment);
+            renderScoreBars(data.score_breakdown, data.composite_score);
+            renderViewsChart(data.videos.videos);
+            renderSentimentChart(data.sentiment);
+            renderEngagementChart(data.videos.videos);
+            renderScoresChart(data.score_breakdown);
+
+            body.classList.remove('hidden');
+        } catch (e) {
+            errorEl.textContent = e.message;
+            errorEl.classList.remove('hidden');
+        } finally {
+            loading.classList.add('hidden');
+        }
+    }
+
+    function closeDetail() {
+        const modal = document.getElementById('detail-modal');
+        modal.classList.add('hidden');
+        document.body.style.overflow = '';
+        destroyCharts();
+    }
+
+    // ESC 또는 배경 클릭으로 닫기
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeDetail();
+    });
+    document.getElementById('detail-modal').addEventListener('click', (e) => {
+        if (e.target.id === 'detail-modal') closeDetail();
+    });
+
+    // --- 스케줄 ---
+
+    async function loadSchedule() {
+        const res = await fetch('/api/v1/schedule');
+        const schedule = await res.json();
+        if (!schedule) return;
+
+        document.getElementById('schedule-enabled').checked = !!schedule.enabled;
+
+        const preset = document.getElementById('schedule-preset');
+        const options = [...preset.options].map(o => o.value);
+        if (options.includes(schedule.cron_expression)) {
+            preset.value = schedule.cron_expression;
+        } else {
+            preset.value = 'custom';
+            document.getElementById('schedule-custom').value = schedule.cron_expression;
+            document.getElementById('schedule-custom').classList.remove('hidden');
+        }
+
+        if (schedule.last_run_at) {
+            document.getElementById('schedule-last-run').textContent =
+                '마지막 실행: ' + new Date(schedule.last_run_at).toLocaleString('ko-KR');
+        }
+    }
+
+    async function saveSchedule() {
+        const enabled = document.getElementById('schedule-enabled').checked;
+        const preset = document.getElementById('schedule-preset').value;
+        const cron = preset === 'custom'
+            ? document.getElementById('schedule-custom').value.trim()
+            : preset;
+
+        if (!cron) { alert('cron 표현식을 입력해주세요.'); return; }
+
+        await fetch('/api/v1/schedule', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cron_expression: cron, enabled }),
+        });
+        alert('스케줄이 저장되었습니다.');
+        loadSchedule();
+    }
+
+    document.getElementById('schedule-preset').addEventListener('change', (e) => {
+        const custom = document.getElementById('schedule-custom');
+        if (e.target.value === 'custom') { custom.classList.remove('hidden'); }
+        else { custom.classList.add('hidden'); }
+    });
+
+    // --- 유틸 ---
+    function formatNum(n) {
+        if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+        if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+        return n.toLocaleString();
+    }
+
+    function showAddError(msg) {
+        const el = document.getElementById('add-error');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+    }
+
+    function escapeHtml(s) {
+        if (s == null) return '';
+        return String(s)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#39;');
+    }
+
+    // 초기 로드
+    loadCreators();
+    loadSchedule();
+    </script>
+</body>
+</html>

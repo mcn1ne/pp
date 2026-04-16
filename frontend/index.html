@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>파트너 크리에이터 평가 도구 - 슈퍼센트</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/style.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Noto Sans KR', 'sans-serif'] },
+                    colors: {
+                        supercent: { 50: '#f0f9ff', 100: '#e0f2fe', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+    <!-- 헤더 -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                    <span class="text-white font-bold text-lg">S</span>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-gray-900">파트너 크리에이터 평가 도구</h1>
+                    <p class="text-xs text-gray-500">Supercent Partner Creator Evaluation</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="/manage.html" class="px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition">크리에이터 관리</a>
+                <span class="text-xs text-gray-400">Powered by Gemini AI + YouTube API</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-6 py-8">
+
+        <!-- 입력 섹션 -->
+        <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-8">
+            <label class="block text-sm font-medium text-gray-700 mb-2">YouTube 채널 URL 입력</label>
+            <div class="flex gap-3">
+                <input
+                    type="text"
+                    id="channel-url"
+                    placeholder="예: https://youtube.com/@channelname"
+                    class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none text-sm"
+                >
+                <button
+                    id="analyze-btn"
+                    onclick="startAnalysis()"
+                    class="px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 whitespace-nowrap"
+                >
+                    <span id="btn-text">분석 시작</span>
+                    <svg id="btn-spinner" class="hidden animate-spin h-5 w-5" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="flex items-center gap-3 mt-3">
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="supercent-filter" checked class="sr-only peer">
+                    <div class="w-9 h-5 bg-gray-300 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                </label>
+                <span class="text-sm text-gray-600">슈퍼센트 게임 영상만 분석</span>
+                <span class="text-xs text-gray-400">(OFF 시 전체 영상 대상)</span>
+            </div>
+            <div id="error-msg" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"></div>
+        </section>
+
+        <!-- 로딩 상태 -->
+        <section id="loading-section" class="hidden mb-8">
+            <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                <div class="animate-spin h-12 w-12 border-4 border-blue-200 border-t-blue-600 rounded-full mx-auto mb-4"></div>
+                <p class="text-gray-600 font-medium" id="loading-text">채널 데이터를 수집하고 있습니다...</p>
+                <p class="text-gray-400 text-sm mt-1">YouTube API + Gemini AI 분석 중 (최대 30초 소요)</p>
+            </div>
+        </section>
+
+        <!-- 결과 대시보드 (초기에는 숨김) -->
+        <div id="result-dashboard" class="hidden space-y-6">
+
+            <!-- 추천 카드 (상단) -->
+            <section id="recommendation-card" class="rounded-xl shadow-sm border p-6">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                        <div id="rec-badge" class="px-5 py-2 rounded-full text-lg font-bold"></div>
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900">파트너십 추천 결과</h3>
+                            <p class="text-sm text-gray-500">종합 점수: <span id="rec-score" class="font-semibold"></span>/100</p>
+                        </div>
+                    </div>
+                    <div class="text-right text-xs text-gray-400" id="rec-date"></div>
+                </div>
+                <p id="rec-summary" class="mt-4 text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-4"></p>
+            </section>
+
+            <!-- 채널 개요 -->
+            <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">채널 개요</h2>
+                <div class="flex items-start gap-6">
+                    <img id="ch-thumbnail" class="w-20 h-20 rounded-full object-cover" src="" alt="">
+                    <div class="flex-1">
+                        <h3 id="ch-title" class="text-xl font-bold text-gray-900"></h3>
+                        <p id="ch-custom-url" class="text-sm text-gray-500 mb-3"></p>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                            <div class="bg-blue-50 rounded-lg p-3 text-center">
+                                <p class="text-xs text-blue-600 font-medium">구독자</p>
+                                <p id="ch-subscribers" class="text-lg font-bold text-blue-700"></p>
+                            </div>
+                            <div class="bg-green-50 rounded-lg p-3 text-center">
+                                <p class="text-xs text-green-600 font-medium">총 조회수</p>
+                                <p id="ch-views" class="text-lg font-bold text-green-700"></p>
+                            </div>
+                            <div class="bg-purple-50 rounded-lg p-3 text-center">
+                                <p class="text-xs text-purple-600 font-medium">영상 수</p>
+                                <p id="ch-videos" class="text-lg font-bold text-purple-700"></p>
+                            </div>
+                            <div class="bg-orange-50 rounded-lg p-3 text-center">
+                                <p class="text-xs text-orange-600 font-medium">가입일</p>
+                                <p id="ch-joined" class="text-sm font-bold text-orange-700"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 슈퍼센트 관련 영상 필터링 정보 -->
+            <section id="supercent-info" class="rounded-xl shadow-sm border p-4">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 bg-indigo-100 rounded-lg flex items-center justify-center">
+                            <span class="text-indigo-600 font-bold text-sm">SC</span>
+                        </div>
+                        <div>
+                            <p class="text-sm font-semibold text-gray-800">슈퍼센트 관련 영상: <span id="sc-video-count" class="text-indigo-600"></span> / 전체 <span id="sc-total-videos" class="text-gray-500"></span>개</p>
+                            <p class="text-xs text-gray-500">분석된 댓글: <span id="sc-comment-count" class="font-medium text-gray-700"></span>개</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="sc-warning" class="hidden mt-3 p-2 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm">
+                    이 채널에서 슈퍼센트 게임 관련 영상을 찾지 못했습니다. 전체 영상 기준으로 분석되었습니다.
+                </div>
+            </section>
+
+            <!-- 차트 그리드 -->
+            <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">최근 영상 조회수</h3>
+                    <canvas id="chart-views" height="200"></canvas>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">댓글 감성 분포</h3>
+                    <canvas id="chart-sentiment" height="200"></canvas>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">영상별 참여율 (%)</h3>
+                    <canvas id="chart-engagement" height="200"></canvas>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">항목별 점수</h3>
+                    <canvas id="chart-scores" height="200"></canvas>
+                </div>
+            </section>
+
+            <!-- 댓글 분석 패널 -->
+            <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">댓글 감성분석 결과</h2>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                    <div class="text-center p-4 bg-green-50 rounded-lg">
+                        <p class="text-3xl font-bold text-green-600" id="sent-positive"></p>
+                        <p class="text-xs text-green-700">긍정</p>
+                    </div>
+                    <div class="text-center p-4 bg-gray-100 rounded-lg">
+                        <p class="text-3xl font-bold text-gray-600" id="sent-neutral"></p>
+                        <p class="text-xs text-gray-700">중립</p>
+                    </div>
+                    <div class="text-center p-4 bg-red-50 rounded-lg">
+                        <p class="text-3xl font-bold text-red-600" id="sent-negative"></p>
+                        <p class="text-xs text-red-700">부정</p>
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2">핵심 테마</h4>
+                    <div id="themes-container" class="flex flex-wrap gap-2"></div>
+                </div>
+                <div>
+                    <h4 class="text-sm font-semibold text-gray-700 mb-2">주목할 댓글 (감정별)</h4>
+                    <ul id="quotes-list" class="space-y-2"></ul>
+                </div>
+                <p class="mt-3 text-sm text-gray-500">전체 감성: <span id="sent-overall" class="font-medium text-gray-700"></span></p>
+                <p class="text-xs text-gray-400">분석된 댓글 수: <span id="sent-count"></span>개</p>
+            </section>
+
+            <!-- 점수 상세 -->
+            <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-bold text-gray-900 mb-4">종합 점수 상세</h2>
+                <div class="flex items-center gap-8">
+                    <div class="text-center">
+                        <div id="composite-score-circle" class="w-28 h-28 rounded-full border-8 flex items-center justify-center mx-auto">
+                            <span id="composite-score-text" class="text-3xl font-bold"></span>
+                        </div>
+                        <p class="text-sm text-gray-500 mt-2">종합 점수</p>
+                    </div>
+                    <div class="flex-1 space-y-3" id="score-bars"></div>
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <script src="/js/charts.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
