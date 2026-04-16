@@ -1,5 +1,15 @@
 // DOM 렌더링 함수들
 
+function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
 function renderSupercentInfo(data) {
     const scCount = data.supercent_video_count;
     const totalVideos = data.videos.videos.length;
@@ -88,7 +98,7 @@ function renderSentimentInfo(sentiment) {
         li.className = `p-3 ${style.bg} rounded-lg text-sm text-gray-700 border-l-4 ${style.border} flex items-start gap-2`;
         li.innerHTML = `
             <span class="${style.badge} text-white text-xs font-bold px-2 py-0.5 rounded-full whitespace-nowrap">${style.label}</span>
-            <span>"${comment.text}"</span>
+            <span>"${escapeHtml(comment.text)}"</span>
         `;
         quotesList.appendChild(li);
     });

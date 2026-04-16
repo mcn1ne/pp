@@ -1,10 +1,15 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
+from backend.auth import require_admin
 from backend.database import get_schedule, update_schedule
 from backend.scheduler import refresh_scheduler
 
-router = APIRouter(prefix="/schedule", tags=["schedule"])
+router = APIRouter(
+    prefix="/schedule",
+    tags=["schedule"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 class ScheduleUpdateRequest(BaseModel):

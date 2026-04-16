@@ -1,8 +1,9 @@
 import json
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from backend.auth import require_admin
 from backend.database import (
     create_creator, get_all_creators, get_creator, delete_creator,
     update_creator_evaluation, get_creator_history,
@@ -16,7 +17,11 @@ from backend.services.gemini_service import analyze_comments, generate_evaluatio
 from backend.services.scoring_service import calculate_scores
 from backend.schemas.evaluation import EvaluationResult
 
-router = APIRouter(prefix="/creators", tags=["creators"])
+router = APIRouter(
+    prefix="/creators",
+    tags=["creators"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 class CreatorCreateRequest(BaseModel):
