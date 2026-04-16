@@ -395,26 +395,49 @@
             ? creatorsCache
             : await fetch('/api/v1/creators').then(r => r.json());
 
+        const CONCURRENCY = 5;
         let done = 0;
         const failures = [];
+        const inFlight = new Set();
         countLabel.textContent = `0 / ${creators.length}`;
         bar.style.width = '0%';
 
-        for (const c of creators) {
-            label.textContent = `평가 중: ${c.channel_name || c.url}`;
+        const updateLabel = () => {
+            if (inFlight.size === 0) return;
+            const names = [...inFlight].map(n => n.length > 18 ? n.slice(0, 18) + '…' : n);
+            label.textContent = `평가 중 (${inFlight.size}건 동시): ${names.join(', ')}`;
+        };
+
+        const evaluateSingle = async (c) => {
+            const name = c.channel_name || c.url;
+            inFlight.add(name);
+            updateLabel();
             try {
                 const res = await fetch(`/api/v1/creators/${c.id}/evaluate`, { method: 'POST' });
                 if (!res.ok) {
                     const err = await res.json().catch(() => ({}));
-                    failures.push(`${c.channel_name || c.url} (${err.detail || res.status})`);
+                    failures.push(`${name} (${err.detail || res.status})`);
                 }
             } catch (e) {
-                failures.push(`${c.channel_name || c.url} (${e.message})`);
+                failures.push(`${name} (${e.message})`);
+            } finally {
+                inFlight.delete(name);
+                done++;
+                countLabel.textContent = `${done} / ${creators.length}`;
+                bar.style.width = (done / creators.length * 100) + '%';
+                updateLabel();
             }
-            done++;
-            countLabel.textContent = `${done} / ${creators.length}`;
-            bar.style.width = (done / creators.length * 100) + '%';
-        }
+        };
+
+        // 고정 크기(5) 작업자 풀: 한 작업이 끝나는 즉시 다음 크리에이터를 집는다
+        const queue = [...creators];
+        const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
+            while (queue.length > 0) {
+                const c = queue.shift();
+                await evaluateSingle(c);
+            }
+        });
+        await Promise.all(workers);
 
         label.textContent = failures.length
             ? `완료 (실패 ${failures.length}건)`
