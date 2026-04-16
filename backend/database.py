@@ -58,6 +58,12 @@ def init_db():
             last_run_at TEXT,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS keywords (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            keyword TEXT NOT NULL UNIQUE,
+            created_at TEXT NOT NULL
+        );
     """)
 
     # 기본 스케줄이 없으면 생성 (매일 09:00)
@@ -68,6 +74,24 @@ def init_db():
             "INSERT INTO schedules (cron_expression, enabled, created_at) VALUES (?, 1, ?)",
             ("0 9 * * *", now),
         )
+
+    # 키워드 테이블이 비었으면 settings 기본값을 1회 seed
+    row = conn.execute("SELECT COUNT(*) as cnt FROM keywords").fetchone()
+    if row["cnt"] == 0:
+        from backend.config import settings
+        now = datetime.now(timezone.utc).isoformat()
+        for kw in settings.supercent_keywords:
+            kw_clean = (kw or "").strip()
+            if not kw_clean:
+                continue
+            try:
+                conn.execute(
+                    "INSERT INTO keywords (keyword, created_at) VALUES (?, ?)",
+                    (kw_clean, now),
+                )
+            except sqlite3.IntegrityError:
+                pass
+
     conn.commit()
     conn.close()
 
@@ -178,3 +202,53 @@ def update_schedule_last_run():
     conn.execute("UPDATE schedules SET last_run_at = ?", (now,))
     conn.commit()
     conn.close()
+
+
+# --- Keywords ---
+
+def get_keywords() -> list[str]:
+    """저장된 슈퍼센트 키워드 전체를 문자열 리스트로 반환한다."""
+    conn = get_db()
+    rows = conn.execute("SELECT keyword FROM keywords ORDER BY id ASC").fetchall()
+    conn.close()
+    return [r["keyword"] for r in rows]
+
+
+def list_keywords() -> list[dict]:
+    """관리 UI 용 — id 포함 레코드 전체."""
+    conn = get_db()
+    rows = conn.execute("SELECT id, keyword, created_at FROM keywords ORDER BY id ASC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def add_keyword(keyword: str) -> dict:
+    """키워드를 추가한다. 빈 값·중복은 ValueError."""
+    kw = (keyword or "").strip()
+    if not kw:
+        raise ValueError("키워드는 비어 있을 수 없습니다.")
+    conn = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO keywords (keyword, created_at) VALUES (?, ?)",
+            (kw, now),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT id, keyword, created_at FROM keywords WHERE id = ?",
+            (cursor.lastrowid,),
+        ).fetchone()
+        return dict(row)
+    except sqlite3.IntegrityError:
+        raise ValueError("이미 등록된 키워드입니다.")
+    finally:
+        conn.close()
+
+
+def delete_keyword(keyword_id: int) -> bool:
+    conn = get_db()
+    cursor = conn.execute("DELETE FROM keywords WHERE id = ?", (keyword_id,))
+    conn.commit()
+    conn.close()
+    return cursor.rowcount > 0

@@ -2,13 +2,15 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from backend.config import settings
 from backend.services.channel_resolver import resolve_channel_id
 from backend.services.youtube_service import (
     get_channel_info, get_recent_videos, get_all_video_comments,
-    filter_supercent_videos,
+    filter_supercent_videos, split_supercent_videos,
 )
 from backend.services.gemini_service import analyze_comments, generate_evaluation_summary
 from backend.services.scoring_service import calculate_scores
+from backend.services.vision_filter import classify_by_thumbnail
 from backend.schemas.evaluation import EvaluationResult
 
 router = APIRouter(prefix="/analyze", tags=["analysis"])
@@ -36,12 +38,16 @@ async def analyze_creator(request: AnalyzeRequest):
 
         # 4) 필터 적용 여부에 따라 대상 영상 결정
         if request.supercent_filter:
-            supercent_videos = filter_supercent_videos(video_list.videos)
+            supercent_videos, unmatched = split_supercent_videos(video_list.videos)
+            # 2차 비전 필터: env 플래그가 켜져 있고 텍스트 미매칭 영상이 있을 때만 호출
+            if settings.sc_vision_filter_enabled and unmatched:
+                vision_hits = classify_by_thumbnail(unmatched)
+                if vision_hits:
+                    # 텍스트 매칭 + 비전 매칭을 합치되 순서는 원본 기준 유지
+                    hit_ids = {v.video_id for v in supercent_videos} | {v.video_id for v in vision_hits}
+                    supercent_videos = [v for v in video_list.videos if v.video_id in hit_ids]
             # 슈퍼센트 관련 영상이 없으면 전체 영상으로 폴백
-            if supercent_videos:
-                target_videos = supercent_videos
-            else:
-                target_videos = video_list.videos
+            target_videos = supercent_videos if supercent_videos else video_list.videos
         else:
             supercent_videos = []
             target_videos = video_list.videos

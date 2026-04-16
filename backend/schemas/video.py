@@ -11,6 +11,8 @@ class VideoMetrics(BaseModel):
     comment_count: int
     thumbnail_url: str
     engagement_rate: float  # (likes + comments) / views * 100
+    description: str = ""
+    tags: list[str] = []
 
 
 class VideoList(BaseModel):

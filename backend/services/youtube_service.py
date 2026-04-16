@@ -92,6 +92,8 @@ def get_recent_videos(channel_id: str, days: int = 30) -> VideoList:
             comment_count=comments,
             thumbnail_url=snippet["thumbnails"]["medium"]["url"],
             engagement_rate=round(engagement, 2),
+            description=snippet.get("description", ""),
+            tags=snippet.get("tags", []) or [],
         ))
 
     # 날짜순 정렬 (최신 먼저)
@@ -116,15 +118,40 @@ def get_recent_videos(channel_id: str, days: int = 30) -> VideoList:
     )
 
 
+def _load_keywords() -> list[str]:
+    """관리자가 편집한 DB 키워드를 우선 사용하고, 비었으면 설정 기본값으로 폴백."""
+    try:
+        from backend.database import get_keywords
+        kws = get_keywords()
+        if kws:
+            return kws
+    except Exception:
+        pass
+    return settings.supercent_keywords
+
+
+def _matches_keywords(video: VideoMetrics, keywords: list[str]) -> bool:
+    haystack = " ".join([
+        video.title or "",
+        video.description or "",
+        " ".join(video.tags or []),
+    ]).lower()
+    return any(kw in haystack for kw in keywords)
+
+
 def filter_supercent_videos(videos: list[VideoMetrics]) -> list[VideoMetrics]:
-    """슈퍼센트 게임과 관련된 영상만 필터링한다."""
-    keywords = [kw.lower() for kw in settings.supercent_keywords]
-    filtered = []
-    for video in videos:
-        title_lower = video.title.lower()
-        if any(kw in title_lower for kw in keywords):
-            filtered.append(video)
-    return filtered
+    """슈퍼센트 게임과 관련된 영상만 필터링한다. title + description + tags 를 모두 확인."""
+    keywords = [kw.lower() for kw in _load_keywords()]
+    return [v for v in videos if _matches_keywords(v, keywords)]
+
+
+def split_supercent_videos(videos: list[VideoMetrics]) -> tuple[list[VideoMetrics], list[VideoMetrics]]:
+    """텍스트 키워드 매칭으로 (관련, 비관련) 두 리스트로 나눈다. 2차 비전 판정용."""
+    keywords = [kw.lower() for kw in _load_keywords()]
+    matched, unmatched = [], []
+    for v in videos:
+        (matched if _matches_keywords(v, keywords) else unmatched).append(v)
+    return matched, unmatched
 
 
 def get_video_comments(video_id: str, max_results: int = 20) -> list[str]:

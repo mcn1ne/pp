@@ -93,6 +93,25 @@
             </div>
         </section>
 
+        <!-- 키워드 관리 -->
+        <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold text-gray-900">슈퍼센트 필터 키워드 <span id="keyword-count" class="text-gray-400 font-normal text-sm"></span></h2>
+                <button onclick="loadKeywords()" class="text-sm text-gray-500 hover:text-gray-700">새로고침</button>
+            </div>
+            <p class="text-xs text-gray-500 mb-3">영상 제목·설명·태그에 이 키워드가 들어가면 슈퍼센트 관련 영상으로 분류됩니다. 대소문자 구분 없음.</p>
+            <div id="keyword-list" class="flex flex-wrap gap-2 mb-4">
+                <p class="text-gray-400 text-sm">로딩 중...</p>
+            </div>
+            <div class="flex flex-col sm:flex-row gap-3">
+                <input type="text" id="new-keyword" placeholder="예: woodoku, 우도쿠"
+                    class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                    onkeydown="if(event.key==='Enter'){addKeyword();}">
+                <button onclick="addKeyword()" class="px-5 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition whitespace-nowrap">추가</button>
+            </div>
+            <div id="keyword-error" class="hidden mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"></div>
+        </section>
+
         <!-- 크리에이터 목록 -->
         <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div class="flex items-center justify-between mb-4">
@@ -594,6 +613,66 @@
         else { custom.classList.add('hidden'); }
     });
 
+    // --- 키워드 관리 ---
+    async function loadKeywords() {
+        const list = document.getElementById('keyword-list');
+        const count = document.getElementById('keyword-count');
+        list.innerHTML = '<p class="text-gray-400 text-sm">로딩 중...</p>';
+        try {
+            const res = await fetch('/api/v1/keywords');
+            if (!res.ok) throw new Error('load failed');
+            const items = await res.json();
+            count.textContent = items.length ? `(${items.length}개)` : '';
+            if (!items.length) {
+                list.innerHTML = '<p class="text-gray-400 text-sm">등록된 키워드가 없습니다.</p>';
+                return;
+            }
+            list.innerHTML = items.map(it => `
+                <span class="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-100 border border-gray-200 rounded-full text-sm text-gray-700">
+                    <span>${escapeHtml(it.keyword)}</span>
+                    <button onclick="deleteKeyword(${it.id})" class="text-gray-400 hover:text-red-500 font-bold leading-none" title="삭제">×</button>
+                </span>
+            `).join('');
+        } catch (e) {
+            list.innerHTML = '<p class="text-red-500 text-sm">키워드를 불러오지 못했습니다.</p>';
+        }
+    }
+
+    async function addKeyword() {
+        const input = document.getElementById('new-keyword');
+        const err = document.getElementById('keyword-error');
+        err.classList.add('hidden');
+        const kw = (input.value || '').trim();
+        if (!kw) {
+            err.textContent = '키워드를 입력해주세요.';
+            err.classList.remove('hidden');
+            return;
+        }
+        const res = await fetch('/api/v1/keywords', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ keyword: kw }),
+        });
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            err.textContent = data.detail || '키워드 추가에 실패했습니다.';
+            err.classList.remove('hidden');
+            return;
+        }
+        input.value = '';
+        loadKeywords();
+    }
+
+    async function deleteKeyword(id) {
+        if (!confirm('이 키워드를 삭제할까요?')) return;
+        const res = await fetch(`/api/v1/keywords/${id}`, { method: 'DELETE' });
+        if (!res.ok) {
+            alert('삭제에 실패했습니다.');
+            return;
+        }
+        loadKeywords();
+    }
+
     // --- 유틸 ---
     function formatNum(n) {
         if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
@@ -620,6 +699,7 @@
     // 초기 로드
     loadCreators();
     loadSchedule();
+    loadKeywords();
     </script>
 </body>
 </html>
