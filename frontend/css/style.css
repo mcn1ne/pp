@@ -27,3 +27,28 @@ body {
 .theme-tag:hover {
     transform: scale(1.05);
 }
+
+@media (max-width: 640px) {
+    main {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    header > div {
+        padding-left: 1rem;
+        padding-right: 1rem;
+    }
+    header p.text-xs {
+        display: none;
+    }
+    canvas[id^="chart-"] {
+        max-height: 220px;
+    }
+    #creator-list .aspect-square {
+        aspect-ratio: auto;
+    }
+    #ch-title,
+    #detail-title {
+        word-break: keep-all;
+        overflow-wrap: anywhere;
+    }
+}

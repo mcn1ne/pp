@@ -24,17 +24,17 @@
 
     <!-- 헤더 -->
     <header class="bg-white shadow-sm border-b border-gray-200">
-        <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div class="max-w-6xl mx-auto px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div class="flex items-center gap-3">
-                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center shrink-0">
                     <span class="text-white font-bold text-lg">S</span>
                 </div>
                 <div>
-                    <h1 class="text-xl font-bold text-gray-900">크리에이터 관리</h1>
+                    <h1 class="text-base sm:text-xl font-bold text-gray-900">크리에이터 관리</h1>
                     <p class="text-xs text-gray-500">등록된 파트너 크리에이터 목록 및 스케줄 관리</p>
                 </div>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2 flex-wrap">
                 <a href="/" class="px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50 transition">개별 분석</a>
                 <button id="eval-all-btn" onclick="evaluateAll()" class="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">전체 평가 실행</button>
             </div>
@@ -58,10 +58,10 @@
         <!-- 크리에이터 추가 -->
         <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 class="text-lg font-bold text-gray-900 mb-4">크리에이터 등록</h2>
-            <div class="flex gap-3">
+            <div class="flex flex-col sm:flex-row gap-3">
                 <input type="text" id="new-url" placeholder="YouTube 채널 URL (예: https://youtube.com/@channelname)"
                     class="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm">
-                <label class="flex items-center gap-2 px-3">
+                <label class="flex items-center gap-2 sm:px-3">
                     <input type="checkbox" id="new-filter" checked class="w-4 h-4 text-blue-600 rounded">
                     <span class="text-sm text-gray-600 whitespace-nowrap">SC 필터</span>
                 </label>
@@ -73,7 +73,7 @@
         <!-- 스케줄 설정 -->
         <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 class="text-lg font-bold text-gray-900 mb-4">자동 평가 스케줄</h2>
-            <div class="flex items-center gap-4 flex-wrap">
+            <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 flex-wrap">
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" id="schedule-enabled" class="sr-only peer">
                     <div class="w-9 h-5 bg-gray-300 rounded-full peer peer-checked:bg-indigo-600 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all"></div>
@@ -87,9 +87,9 @@
                     <option value="0 */12 * * *">12시간마다</option>
                     <option value="custom">직접 입력 (cron)</option>
                 </select>
-                <input type="text" id="schedule-custom" placeholder="분 시 일 월 요일" class="hidden px-3 py-2 border border-gray-300 rounded-lg text-sm w-48">
+                <input type="text" id="schedule-custom" placeholder="분 시 일 월 요일" class="hidden px-3 py-2 border border-gray-300 rounded-lg text-sm w-full sm:w-48">
                 <button onclick="saveSchedule()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">저장</button>
-                <span id="schedule-last-run" class="text-xs text-gray-400 ml-auto"></span>
+                <span id="schedule-last-run" class="text-xs text-gray-400 sm:ml-auto"></span>
             </div>
         </section>
 
@@ -133,7 +133,7 @@
 
                     <!-- 추천 카드 -->
                     <section id="recommendation-card" class="rounded-xl shadow-sm border p-6">
-                        <div class="flex items-center justify-between">
+                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                             <div class="flex items-center gap-4">
                                 <div id="rec-badge" class="px-5 py-2 rounded-full text-lg font-bold"></div>
                                 <div>
@@ -141,7 +141,7 @@
                                     <p class="text-sm text-gray-500">종합 점수: <span id="rec-score" class="font-semibold"></span>/100</p>
                                 </div>
                             </div>
-                            <div class="text-right text-xs text-gray-400" id="rec-date"></div>
+                            <div class="text-left sm:text-right text-xs text-gray-400" id="rec-date"></div>
                         </div>
                         <p id="rec-summary" class="mt-4 text-gray-700 leading-relaxed bg-gray-50 rounded-lg p-4"></p>
                     </section>
@@ -149,9 +149,9 @@
                     <!-- 채널 개요 -->
                     <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                         <h2 class="text-lg font-bold text-gray-900 mb-4">채널 개요</h2>
-                        <div class="flex items-start gap-6">
+                        <div class="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-6">
                             <img id="ch-thumbnail" class="w-20 h-20 rounded-full object-cover" src="" alt="">
-                            <div class="flex-1">
+                            <div class="flex-1 text-center sm:text-left w-full">
                                 <h3 id="ch-title" class="text-xl font-bold text-gray-900"></h3>
                                 <p id="ch-custom-url" class="text-sm text-gray-500 mb-3"></p>
                                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -244,14 +244,14 @@
                     <!-- 점수 상세 -->
                     <section class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                         <h2 class="text-lg font-bold text-gray-900 mb-4">종합 점수 상세</h2>
-                        <div class="flex items-center gap-8">
+                        <div class="flex flex-col md:flex-row md:items-center gap-6 md:gap-8">
                             <div class="text-center">
                                 <div id="composite-score-circle" class="w-28 h-28 rounded-full border-8 flex items-center justify-center mx-auto">
                                     <span id="composite-score-text" class="text-3xl font-bold"></span>
                                 </div>
                                 <p class="text-sm text-gray-500 mt-2">종합 점수</p>
                             </div>
-                            <div class="flex-1 space-y-3" id="score-bars"></div>
+                            <div class="flex-1 w-full space-y-3" id="score-bars"></div>
                         </div>
                     </section>
                 </div>
@@ -303,7 +303,7 @@
             const onclick = c.last_evaluated_at ? `onclick="handleCardClick(event, ${c.id})"` : '';
 
             return `
-            <div class="aspect-square flex flex-col p-4 bg-white border border-gray-200 rounded-xl transition ${clickable} fade-in" ${onclick}>
+            <div class="sm:aspect-square flex flex-col p-4 bg-white border border-gray-200 rounded-xl transition ${clickable} fade-in" ${onclick}>
                 <div class="flex items-start gap-3">
                     ${thumb}
                     <div class="flex-1 min-w-0">

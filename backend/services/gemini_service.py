@@ -140,7 +140,7 @@ def _analyze_batch(comments: list[str], channel_name: str) -> dict | None:
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
         )
         result = _parse_json_response(response.text)
