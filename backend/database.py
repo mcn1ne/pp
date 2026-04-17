@@ -138,31 +138,35 @@ def delete_creator(creator_id: int) -> bool:
 
 
 def update_creator_evaluation(creator_id: int, channel_id: str, channel_name: str,
-                               thumbnail_url: str, subscriber_count: int,
-                               score: float, recommendation: str, ai_summary: str,
-                               result_json: str):
-    """평가 결과를 creator에 저장하고 히스토리에 추가한다."""
-    conn = get_db()
-    now = datetime.now(timezone.utc).isoformat()
+                                 thumbnail_url: str, subscriber_count: int,
+                                 score: float, recommendation: str, ai_summary: str,
+                                 result_json: str):
+      """평가 결과를 creator에 저장하고 히스토리에 추가한다."""
+      conn = get_db()
+      now = datetime.now(timezone.utc).isoformat()
 
-    conn.execute("""
-        UPDATE creators SET
-            channel_id = ?, channel_name = ?, thumbnail_url = ?,
-            subscriber_count = ?, last_score = ?, last_recommendation = ?,
-            last_ai_summary = ?, last_evaluated_at = ?, updated_at = ?
-        WHERE id = ?
-    """, (channel_id, channel_name, thumbnail_url, subscriber_count,
-          score, recommendation, ai_summary, now, now, creator_id))
+      try:
+          conn.execute("""
+              UPDATE creators SET
+                  channel_id = ?, channel_name = ?, thumbnail_url = ?,
+                  subscriber_count = ?, last_score = ?, last_recommendation = ?,
+                  last_ai_summary = ?, last_evaluated_at = ?, updated_at = ?
+              WHERE id = ?
+          """, (channel_id, channel_name, thumbnail_url, subscriber_count,
+                score, recommendation, ai_summary, now, now, creator_id))
 
-    conn.execute("""
-        INSERT INTO evaluation_history
-            (creator_id, composite_score, recommendation, ai_summary, result_json, evaluated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (creator_id, score, recommendation, ai_summary, result_json, now))
+          conn.execute("""
+              INSERT INTO evaluation_history
+                  (creator_id, composite_score, recommendation, ai_summary, result_json, evaluated_at)
+              VALUES (?, ?, ?, ?, ?, ?)
+          """, (creator_id, score, recommendation, ai_summary, result_json, now))
 
-    conn.commit()
-    conn.close()
-
+          conn.commit()
+      except Exception:
+          conn.rollback()
+          raise
+      finally:
+          conn.close()
 
 def get_creator_history(creator_id: int, limit: int = 10) -> list[dict]:
     conn = get_db()
