@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -43,23 +44,31 @@ def run_all_evaluations():
     }
     logger.info(f"스케줄 실행: {len(creators)}개 크리에이터 평가 시작")
 
-    try:
-        for creator in creators:
-            name = creator.get("channel_name") or creator["url"]
-            _batch_status["current"] = name
-            logger.info(f"  [{name}] 평가 시작 ({_batch_status['done'] + 1}/{len(creators)})")
-            try:
-                result = run_evaluation(creator)
-                logger.info(f"  [{name}] → {result['recommendation']} ({result['composite_score']}점)")
-            except Exception as e:
-                logger.error(f"  [{name}] 평가 실패: {e}")
-            finally:
-                _batch_status["done"] += 1
-    finally:
-        _batch_status["running"] = False
-        _batch_status["current"] = None
-        update_schedule_last_run()
-        logger.info("스케줄 실행 완료")
+      failed = []
+      try:
+          with ThreadPoolExecutor(max_workers=3) as executor:
+              future_to_creator = {
+                  executor.submit(run_evaluation, c): c for c in creators
+              }
+              for future in as_completed(future_to_creator):
+                  creator = future_to_creator[future]
+                  name = creator.get("channel_name") or creator["url"]
+                  try:
+                      result = future.result()
+                      logger.info(f"  [{name}] → {result['recommendation']} ({result['composite_score']}점)")
+                  except Exception as e:
+                      logger.error(f"  [{name}] 평가 실패: {e}")
+                      failed.append(name)
+                  finally:
+                      _batch_status["done"] += 1
+                      _batch_status["current"] = name
+      finally:
+          _batch_status["running"] = False
+          _batch_status["current"] = None
+          update_schedule_last_run()
+          if failed:
+              logger.warning(f"실패한 크리에이터 ({len(failed)}건): {', '.join(failed)}")
+          logger.info(f"스케줄 실행 완료 (성공 {len(creators) - len(failed)}/{len(creators)})")
 
 
 def start_scheduler():
