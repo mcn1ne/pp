@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -9,21 +10,48 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
 JOB_ID = "auto_evaluate_all"
 
+_batch_status: dict = {
+    "running": False,
+    "total": 0,
+    "done": 0,
+    "current": None,
+    "started_at": None,
+}
+
+
+def get_batch_status() -> dict:
+    return dict(_batch_status)
+
 
 def run_all_evaluations():
     """등록된 모든 크리에이터를 순차 평가한다."""
+    global _batch_status
     from backend.api.v1.endpoints.creators import run_evaluation
 
     creators = get_all_creators()
+    _batch_status = {
+        "running": True,
+        "total": len(creators),
+        "done": 0,
+        "current": None,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
     logger.info(f"스케줄 실행: {len(creators)}개 크리에이터 평가 시작")
 
     for creator in creators:
+        name = creator.get("channel_name") or creator["url"]
+        _batch_status["current"] = name
+        logger.info(f"  [{name}] 평가 시작 ({_batch_status['done'] + 1}/{len(creators)})")
         try:
             result = run_evaluation(creator)
-            logger.info(f"  [{creator['url']}] → {result['recommendation']} ({result['composite_score']}점)")
+            logger.info(f"  [{name}] → {result['recommendation']} ({result['composite_score']}점)")
         except Exception as e:
-            logger.error(f"  [{creator['url']}] 평가 실패: {e}")
+            logger.error(f"  [{name}] 평가 실패: {e}")
+        finally:
+            _batch_status["done"] += 1
 
+    _batch_status["running"] = False
+    _batch_status["current"] = None
     update_schedule_last_run()
     logger.info("스케줄 실행 완료")
 

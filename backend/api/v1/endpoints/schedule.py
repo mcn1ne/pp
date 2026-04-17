@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 from backend.auth import require_admin
 from backend.database import get_schedule, update_schedule
-from backend.scheduler import refresh_scheduler
+from backend.scheduler import refresh_scheduler, get_batch_status
 
 router = APIRouter(
     prefix="/schedule",
@@ -29,3 +29,9 @@ async def update_current_schedule(request: ScheduleUpdateRequest):
     result = update_schedule(request.cron_expression, request.enabled)
     refresh_scheduler()
     return result
+
+
+@router.get("/status")
+async def schedule_batch_status():
+    """현재 배치 실행 진행 상태를 반환한다."""
+    return get_batch_status()

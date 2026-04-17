@@ -91,6 +91,17 @@
                 <button onclick="saveSchedule()" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition">저장</button>
                 <span id="schedule-last-run" class="text-xs text-gray-400 sm:ml-auto"></span>
             </div>
+            <!-- 배치 실행 진행 상태 -->
+            <div id="sched-progress" class="hidden mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-sm font-medium text-indigo-700">스케줄 배치 실행 중</span>
+                    <span id="sched-count" class="text-xs font-medium text-indigo-600">0 / 0</span>
+                </div>
+                <div class="w-full bg-indigo-100 rounded-full h-1.5 mb-1.5">
+                    <div id="sched-bar" class="bg-indigo-500 h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+                </div>
+                <p id="sched-current" class="text-xs text-indigo-500 truncate"></p>
+            </div>
         </section>
 
         <!-- 키워드 관리 -->
@@ -564,6 +575,41 @@
         if (e.target.id === 'detail-modal') closeDetail();
     });
 
+    // --- 스케줄 배치 진행 상태 폴링 ---
+
+    let _schedPollTimer = null;
+
+    async function checkBatchStatus() {
+        try {
+            const res = await fetch('/api/v1/schedule/status');
+            if (!res.ok) return;
+            const s = await res.json();
+
+            const box = document.getElementById('sched-progress');
+            const countEl = document.getElementById('sched-count');
+            const barEl = document.getElementById('sched-bar');
+            const curEl = document.getElementById('sched-current');
+
+            if (s.running) {
+                box.classList.remove('hidden');
+                countEl.textContent = `${s.done} / ${s.total}`;
+                barEl.style.width = s.total > 0 ? (s.done / s.total * 100) + '%' : '0%';
+                curEl.textContent = s.current ? `평가 중: ${s.current}` : '준비 중...';
+                if (!_schedPollTimer) {
+                    _schedPollTimer = setInterval(checkBatchStatus, 3000);
+                }
+            } else {
+                box.classList.add('hidden');
+                if (_schedPollTimer) {
+                    clearInterval(_schedPollTimer);
+                    _schedPollTimer = null;
+                    loadSchedule();
+                    loadCreators();
+                }
+            }
+        } catch (_) {}
+    }
+
     // --- 스케줄 ---
 
     async function loadSchedule() {
@@ -700,6 +746,7 @@
     loadCreators();
     loadSchedule();
     loadKeywords();
+    checkBatchStatus();
     </script>
 </body>
 </html>
