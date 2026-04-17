@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from googleapiclient.errors import HttpError
@@ -91,7 +92,18 @@ def evaluate_creator(creator_id: int):
     if not creator:
         raise HTTPException(status_code=404, detail="크리에이터를 찾을 수 없습니다.")
 
-    result = run_evaluation(creator)
+    try:
+        result = run_evaluation(creator)
+    except HttpError as e:
+        if e.resp.status == 403 and "quotaExceeded" in str(e):
+            raise HTTPException(
+                status_code=429,
+                detail="YouTube Data API 일일 할당량을 초과했습니다. 태평양 시간 자정(한국시간 오후 4시)에 리셋됩니다.",
+            )
+        raise HTTPException(status_code=502, detail=f"YouTube API 오류: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
     return result
 
 
@@ -118,9 +130,10 @@ def run_evaluation(creator: dict) -> dict:
         target_videos = video_list.videos
 
     all_comments = []
-    for video in target_videos:
-        comments = get_all_video_comments(video.video_id, max_pages=10)
-        all_comments.extend(comments)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(get_all_video_comments, v.video_id, 10): v for v in target_videos}
+        for future in futures:
+            all_comments.extend(future.result())
 
     sentiment = analyze_comments(all_comments, channel.title)
 
