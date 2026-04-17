@@ -26,6 +26,11 @@ def get_batch_status() -> dict:
 def run_all_evaluations():
     """등록된 모든 크리에이터를 순차 평가한다."""
     global _batch_status
+
+    if _batch_status["running"]:
+        logger.warning("이전 배치 실행이 아직 진행 중입니다. 중복 실행을 건너뜁니다.")
+        return
+
     from backend.api.v1.endpoints.creators import run_evaluation
 
     creators = get_all_creators()
@@ -38,22 +43,23 @@ def run_all_evaluations():
     }
     logger.info(f"스케줄 실행: {len(creators)}개 크리에이터 평가 시작")
 
-    for creator in creators:
-        name = creator.get("channel_name") or creator["url"]
-        _batch_status["current"] = name
-        logger.info(f"  [{name}] 평가 시작 ({_batch_status['done'] + 1}/{len(creators)})")
-        try:
-            result = run_evaluation(creator)
-            logger.info(f"  [{name}] → {result['recommendation']} ({result['composite_score']}점)")
-        except Exception as e:
-            logger.error(f"  [{name}] 평가 실패: {e}")
-        finally:
-            _batch_status["done"] += 1
-
-    _batch_status["running"] = False
-    _batch_status["current"] = None
-    update_schedule_last_run()
-    logger.info("스케줄 실행 완료")
+    try:
+        for creator in creators:
+            name = creator.get("channel_name") or creator["url"]
+            _batch_status["current"] = name
+            logger.info(f"  [{name}] 평가 시작 ({_batch_status['done'] + 1}/{len(creators)})")
+            try:
+                result = run_evaluation(creator)
+                logger.info(f"  [{name}] → {result['recommendation']} ({result['composite_score']}점)")
+            except Exception as e:
+                logger.error(f"  [{name}] 평가 실패: {e}")
+            finally:
+                _batch_status["done"] += 1
+    finally:
+        _batch_status["running"] = False
+        _batch_status["current"] = None
+        update_schedule_last_run()
+        logger.info("스케줄 실행 완료")
 
 
 def start_scheduler():
@@ -99,4 +105,6 @@ def _apply_schedule(cron_expression: str):
         id=JOB_ID,
         replace_existing=True,
         misfire_grace_time=3600,
+        max_instances=1,
+        coalesce=True,
     )

@@ -1,18 +1,23 @@
 import json
+import logging
 import os
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
 
 from google import genai
 from google.genai import types
 from backend.config import settings
 from backend.schemas.sentiment import SentimentSummary, NotableComment
 
+logger = logging.getLogger(__name__)
+
 _MAX_RETRIES = 2
 _BACKOFF = [2, 4]
 
 
+@lru_cache(maxsize=1)
 def _get_client():
     return genai.Client(
         api_key=settings.gemini_api_key,
@@ -152,9 +157,10 @@ def _analyze_batch(comments: list[str], channel_name: str) -> dict | None:
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
-            result = _parse_json_response(response.text)
+            result = _parse_json_response(response.text or "")
             return result if result else None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Gemini 배치 분석 실패 (시도 {attempt + 1}/{_MAX_RETRIES + 1}): {e}")
             if attempt < _MAX_RETRIES:
                 time.sleep(_BACKOFF[attempt])
     return None
@@ -193,8 +199,9 @@ def generate_evaluation_summary(
                 model="gemini-3-flash-preview",
                 contents=prompt,
             )
-            return response.text.strip()
-        except Exception:
+            return (response.text or "").strip() or "평가 요약 생성에 실패했습니다."
+        except Exception as e:
+            logger.warning(f"Gemini 요약 생성 실패 (시도 {attempt + 1}/{_MAX_RETRIES + 1}): {e}")
             if attempt < _MAX_RETRIES:
                 time.sleep(_BACKOFF[attempt])
     return "평가 요약 생성에 실패했습니다."

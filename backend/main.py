@@ -3,6 +3,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+import logging
 import os
 
 from backend.auth import require_admin
@@ -11,9 +12,16 @@ from backend.api.v1.router import router as v1_router
 from backend.database import init_db
 from backend.scheduler import start_scheduler
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if not os.environ.get("ADMIN_USERNAME") or not os.environ.get("ADMIN_PASSWORD"):
+        logger.warning(
+            "ADMIN_USERNAME / ADMIN_PASSWORD 환경변수가 설정되지 않았습니다. "
+            "기본 자격증명(admin/supercent)이 사용됩니다. 프로덕션 환경에서는 반드시 설정하세요."
+        )
     init_db()
     start_scheduler()
     yield
