@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -117,9 +118,10 @@ def run_evaluation(creator: dict) -> dict:
         target_videos = video_list.videos
 
     all_comments = []
-    for video in target_videos:
-        comments = get_all_video_comments(video.video_id, max_pages=10)
-        all_comments.extend(comments)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(get_all_video_comments, v.video_id, 10): v for v in target_videos}
+        for future in futures:
+            all_comments.extend(future.result())
 
     sentiment = analyze_comments(all_comments, channel.title)
 
