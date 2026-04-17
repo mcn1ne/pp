@@ -21,7 +21,7 @@ _BACKOFF = [2, 4]
 def _get_client():
     return genai.Client(
         api_key=settings.gemini_api_key,
-        http_options=types.HttpOptions(timeout=120),
+        http_options=types.HttpOptions(timeout=1200),
     )
 
 
