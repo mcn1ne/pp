@@ -45,10 +45,10 @@ def get_recent_videos(channel_id: str, days: int = 30) -> VideoList:
 
     published_after = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
 
-    # 1) 기간 내 영상 ID 검색 (페이지네이션으로 전부 수집)
+    # 1) 기간 내 영상 ID 검색 (페이지네이션, 최대 20페이지)
     video_ids = []
     next_page_token = None
-    while True:
+    for _ in range(20):
         search_response = youtube.search().list(
             part="id",
             channelId=channel_id,
@@ -68,33 +68,33 @@ def get_recent_videos(channel_id: str, days: int = 30) -> VideoList:
     if not video_ids:
         return VideoList(videos=[], avg_views=0, avg_engagement_rate=0, upload_frequency_days=0)
 
-    # 2) 영상 상세 정보
-    videos_response = youtube.videos().list(
-        part="snippet,statistics",
-        id=",".join(video_ids)
-    ).execute()
-
+    # 2) 영상 상세 정보 (API 한도 50개씩 청크 처리)
     videos = []
-    for item in videos_response.get("items", []):
-        snippet = item["snippet"]
-        stats = item["statistics"]
-        views = int(stats.get("viewCount", 0))
-        likes = int(stats.get("likeCount", 0))
-        comments = int(stats.get("commentCount", 0))
-        engagement = ((likes + comments) / views * 100) if views > 0 else 0
-
-        videos.append(VideoMetrics(
-            video_id=item["id"],
-            title=snippet["title"],
-            published_at=snippet["publishedAt"],
-            view_count=views,
-            like_count=likes,
-            comment_count=comments,
-            thumbnail_url=snippet["thumbnails"]["medium"]["url"],
-            engagement_rate=round(engagement, 2),
-            description=snippet.get("description", ""),
-            tags=snippet.get("tags", []) or [],
-        ))
+    for chunk_start in range(0, len(video_ids), 50):
+        chunk = video_ids[chunk_start:chunk_start + 50]
+        videos_response = youtube.videos().list(
+            part="snippet,statistics",
+            id=",".join(chunk)
+        ).execute()
+        for item in videos_response.get("items", []):
+            snippet = item["snippet"]
+            stats = item["statistics"]
+            views = int(stats.get("viewCount", 0))
+            likes = int(stats.get("likeCount", 0))
+            comments = int(stats.get("commentCount", 0))
+            engagement = ((likes + comments) / views * 100) if views > 0 else 0
+            videos.append(VideoMetrics(
+                video_id=item["id"],
+                title=snippet["title"],
+                published_at=snippet["publishedAt"],
+                view_count=views,
+                like_count=likes,
+                comment_count=comments,
+                thumbnail_url=snippet["thumbnails"]["medium"]["url"],
+                engagement_rate=round(engagement, 2),
+                description=snippet.get("description", ""),
+                tags=snippet.get("tags", []) or [],
+            ))
 
     # 날짜순 정렬 (최신 먼저)
     videos.sort(key=lambda v: v.published_at, reverse=True)
