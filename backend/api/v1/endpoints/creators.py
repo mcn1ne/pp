@@ -98,7 +98,7 @@ def evaluate_creator(creator_id: int):
         if e.resp.status == 403 and "quotaExceeded" in str(e):
             raise HTTPException(
                 status_code=429,
-                detail="YouTube Data API 일일 할당량을 초과했습니다. 태평양 시간 자정(한국시간 오후 4시)에 리셋됩니다.",
+                detail="YouTube Data API 일일 할당량을 초과했습니다. 태평양 시간 자정(한국시간 오후 4시)에 리셋됩니다.!",
             )
         raise HTTPException(status_code=502, detail=f"YouTube API 오류: {e}")
     except ValueError as e:
