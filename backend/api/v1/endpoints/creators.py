@@ -2,6 +2,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
+from googleapiclient.errors import HttpError
 from pydantic import BaseModel
 
 from backend.auth import require_admin
@@ -91,7 +92,18 @@ def evaluate_creator(creator_id: int):
     if not creator:
         raise HTTPException(status_code=404, detail="크리에이터를 찾을 수 없습니다.")
 
-    result = run_evaluation(creator)
+    try:
+        result = run_evaluation(creator)
+    except HttpError as e:
+        if e.resp.status == 403 and "quotaExceeded" in str(e):
+            raise HTTPException(
+                status_code=429,
+                detail="YouTube Data API 일일 할당량을 초과했습니다. 태평양 시간 자정(한국시간 오후 4시)에 리셋됩니다.",
+            )
+        raise HTTPException(status_code=502, detail=f"YouTube API 오류: {e}")
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
     return result
 
 
