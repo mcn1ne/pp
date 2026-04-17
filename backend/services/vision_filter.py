@@ -19,7 +19,10 @@ _BATCH_CONCURRENCY = max(1, int(os.environ.get("GEMINI_BATCH_CONCURRENCY", "3"))
 
 
 def _get_client():
-    return genai.Client(api_key=settings.gemini_api_key)
+    return genai.Client(
+        api_key=settings.gemini_api_key,
+        http_options=types.HttpOptions(timeout=120),
+    )
 
 
 def _fetch_thumbnail(url: str) -> bytes | None:

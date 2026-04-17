@@ -1,15 +1,23 @@
 import json
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 from google import genai
+from google.genai import types
 from backend.config import settings
 from backend.schemas.sentiment import SentimentSummary, NotableComment
 
+_MAX_RETRIES = 2
+_BACKOFF = [2, 4]
+
 
 def _get_client():
-    return genai.Client(api_key=settings.gemini_api_key)
+    return genai.Client(
+        api_key=settings.gemini_api_key,
+        http_options=types.HttpOptions(timeout=120),
+    )
 
 
 BATCH_SIZE = 100  # 배치당 댓글 수
@@ -138,15 +146,18 @@ def _analyze_batch(comments: list[str], channel_name: str) -> dict | None:
 - 한국어로 작성하세요
 """
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-        )
-        result = _parse_json_response(response.text)
-        return result if result else None
-    except Exception:
-        return None
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            result = _parse_json_response(response.text)
+            return result if result else None
+        except Exception:
+            if attempt < _MAX_RETRIES:
+                time.sleep(_BACKOFF[attempt])
+    return None
 
 
 def generate_evaluation_summary(
@@ -176,12 +187,17 @@ def generate_evaluation_summary(
 파트너십 확대/유지/축소에 대한 의견을 포함해주세요.
 """
 
-    response = client.models.generate_content(
-        model="gemini-3-flash-preview",
-        contents=prompt,
-    )
-
-    return response.text.strip()
+    for attempt in range(_MAX_RETRIES + 1):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3-flash-preview",
+                contents=prompt,
+            )
+            return response.text.strip()
+        except Exception:
+            if attempt < _MAX_RETRIES:
+                time.sleep(_BACKOFF[attempt])
+    return "평가 요약 생성에 실패했습니다."
 
 
 def _parse_json_response(text: str) -> dict:

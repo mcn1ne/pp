@@ -65,4 +65,10 @@ def _apply_schedule(cron_expression: str):
     trigger = CronTrigger(
         minute=minute, hour=hour, day=day, month=month, day_of_week=day_of_week
     )
-    scheduler.add_job(run_all_evaluations, trigger, id=JOB_ID, replace_existing=True)
+    scheduler.add_job(
+        run_all_evaluations,
+        trigger,
+        id=JOB_ID,
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
