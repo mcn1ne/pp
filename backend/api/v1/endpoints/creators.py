@@ -1,9 +1,13 @@
 import json
+import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from backend.auth import require_admin
 from backend.database import (
@@ -85,24 +89,50 @@ async def creator_latest_result(creator_id: int):
     return payload
 
 
+@router.post("/evaluate-all")
+def evaluate_all_creators():
+    """등록된 모든 크리에이터를 백그라운드에서 일괄 평가한다.
+
+    스케줄 실행과 동일한 `run_all_evaluations()` 경로를 재사용한다.
+    진행 상태는 `GET /api/v1/schedule/status` 로 폴링한다.
+    """
+    from backend.scheduler import run_all_evaluations, get_batch_status
+
+    status = get_batch_status()
+    if status.get("running"):
+        raise HTTPException(status_code=409, detail="이미 일괄 평가가 진행 중입니다.")
+
+    thread = threading.Thread(target=run_all_evaluations, daemon=True)
+    thread.start()
+    logger.info("수동 일괄 평가 시작 (관리자 콘솔)")
+    return {"status": "started"}
+
+
 @router.post("/{creator_id}/evaluate")
 def evaluate_creator(creator_id: int):
-    """특정 크리에이터를 즉시 평가한다."""
+    """특정 크리에이터를 즉시 평가한다. 스케줄과 동일하게 모든 예외를 잡아 로그에 남긴다."""
     creator = get_creator(creator_id)
     if not creator:
         raise HTTPException(status_code=404, detail="크리에이터를 찾을 수 없습니다.")
 
+    name = creator.get("channel_name") or creator.get("url") or f"id={creator_id}"
     try:
         result = run_evaluation(creator)
     except HttpError as e:
         if e.resp.status == 403 and "quotaExceeded" in str(e):
+            logger.warning(f"[{name}] YouTube 할당량 초과")
             raise HTTPException(
                 status_code=429,
                 detail="YouTube Data API 일일 할당량을 초과했습니다. 태평양 시간 자정(한국시간 오후 4시)에 리셋됩니다.",
             )
+        logger.exception(f"[{name}] YouTube API 오류")
         raise HTTPException(status_code=502, detail=f"YouTube API 오류: {e}")
     except ValueError as e:
+        logger.warning(f"[{name}] 평가 입력 오류: {e}")
         raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.exception(f"[{name}] 평가 실패")
+        raise HTTPException(status_code=500, detail=f"평가 실패: {e}")
 
     return result
 

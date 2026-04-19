@@ -436,75 +436,34 @@
         btn.disabled = true;
 
         const progress = document.getElementById('bulk-progress');
-        const bar = document.getElementById('bulk-progress-bar');
-        const countLabel = document.getElementById('bulk-progress-count');
         const failedLabel = document.getElementById('bulk-progress-failed');
         const label = document.getElementById('bulk-progress-label');
+        const bar = document.getElementById('bulk-progress-bar');
+        const countLabel = document.getElementById('bulk-progress-count');
 
         progress.classList.remove('hidden');
         failedLabel.classList.add('hidden');
         failedLabel.textContent = '';
-
-        const creators = creatorsCache.length
-            ? creatorsCache
-            : await fetch('/api/v1/creators').then(r => r.json());
-
-        const CONCURRENCY = 5;
-        let done = 0;
-        const failures = [];
-        const inFlight = new Set();
-        countLabel.textContent = `0 / ${creators.length}`;
+        label.textContent = '시작 중...';
+        countLabel.textContent = '0 / 0';
         bar.style.width = '0%';
 
-        const updateLabel = () => {
-            if (inFlight.size === 0) return;
-            const names = [...inFlight].map(n => n.length > 18 ? n.slice(0, 18) + '…' : n);
-            label.textContent = `평가 중 (${inFlight.size}건 동시): ${names.join(', ')}`;
-        };
-
-        const evaluateSingle = async (c) => {
-            const name = c.channel_name || c.url;
-            inFlight.add(name);
-            updateLabel();
-            try {
-                const res = await fetch(`/api/v1/creators/${c.id}/evaluate`, { method: 'POST' });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    failures.push(`${name} (${err.detail || res.status})`);
-                }
-            } catch (e) {
-                failures.push(`${name} (${e.message})`);
-            } finally {
-                inFlight.delete(name);
-                done++;
-                countLabel.textContent = `${done} / ${creators.length}`;
-                bar.style.width = (done / creators.length * 100) + '%';
-                updateLabel();
+        try {
+            const res = await fetch('/api/v1/creators/evaluate-all', { method: 'POST' });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `일괄 평가 시작 실패 (${res.status})`);
             }
-        };
-
-        // 고정 크기(5) 작업자 풀: 한 작업이 끝나는 즉시 다음 크리에이터를 집는다
-        const queue = [...creators];
-        const workers = Array.from({ length: Math.min(CONCURRENCY, queue.length) }, async () => {
-            while (queue.length > 0) {
-                const c = queue.shift();
-                await evaluateSingle(c);
-            }
-        });
-        await Promise.all(workers);
-
-        label.textContent = failures.length
-            ? `완료 (실패 ${failures.length}건)`
-            : '전체 평가 완료';
-
-        if (failures.length) {
-            failedLabel.classList.remove('hidden');
-            failedLabel.textContent = '실패: ' + failures.join(' / ');
+        } catch (e) {
+            alert(e.message);
+            progress.classList.add('hidden');
+            btn.textContent = '전체 평가 실행';
+            btn.disabled = false;
+            return;
         }
 
-        btn.textContent = '전체 평가 실행';
-        btn.disabled = false;
-        loadCreators();
+        // 백엔드 상태를 즉시 한 번 체크하고, 이후는 checkBatchStatus() 가 3초마다 폴링
+        checkBatchStatus();
     }
 
     // --- 상세 보기 모달 ---
@@ -585,16 +544,37 @@
             if (!res.ok) return;
             const s = await res.json();
 
+            // 스케줄 진행 박스 (스케줄 섹션 내부)
             const box = document.getElementById('sched-progress');
             const countEl = document.getElementById('sched-count');
             const barEl = document.getElementById('sched-bar');
             const curEl = document.getElementById('sched-current');
 
+            // 수동 전체평가 박스 (헤더 아래)
+            const bulkBox = document.getElementById('bulk-progress');
+            const bulkLabel = document.getElementById('bulk-progress-label');
+            const bulkCount = document.getElementById('bulk-progress-count');
+            const bulkBar = document.getElementById('bulk-progress-bar');
+            const bulkFailed = document.getElementById('bulk-progress-failed');
+            const evalBtn = document.getElementById('eval-all-btn');
+
             if (s.running) {
+                const pct = s.total > 0 ? (s.done / s.total * 100) + '%' : '0%';
+                const countText = `${s.done} / ${s.total}`;
+
                 box.classList.remove('hidden');
-                countEl.textContent = `${s.done} / ${s.total}`;
-                barEl.style.width = s.total > 0 ? (s.done / s.total * 100) + '%' : '0%';
+                countEl.textContent = countText;
+                barEl.style.width = pct;
                 curEl.textContent = s.current ? `평가 중: ${s.current}` : '준비 중...';
+
+                // 수동으로 시작된 경우 button 이 이미 disabled 상태이므로 bulk 박스도 맞춰 갱신
+                if (evalBtn && evalBtn.disabled) {
+                    bulkBox.classList.remove('hidden');
+                    bulkCount.textContent = countText;
+                    bulkBar.style.width = pct;
+                    bulkLabel.textContent = s.current ? `평가 중: ${s.current}` : '평가 진행 중';
+                }
+
                 if (!_schedPollTimer) {
                     _schedPollTimer = setInterval(checkBatchStatus, 3000);
                 }
@@ -604,6 +584,23 @@
                     clearInterval(_schedPollTimer);
                     _schedPollTimer = null;
                     loadSchedule();
+                    loadCreators();
+                }
+                // 수동 전체평가가 진행 중이었다면 버튼 복구 + 실패 목록 노출
+                if (evalBtn && evalBtn.disabled) {
+                    const failed = s.failed || [];
+                    const total = s.total || 0;
+                    bulkLabel.textContent = failed.length
+                        ? `완료 (실패 ${failed.length}건)`
+                        : '전체 평가 완료';
+                    bulkCount.textContent = `${total} / ${total}`;
+                    bulkBar.style.width = '100%';
+                    if (failed.length) {
+                        bulkFailed.classList.remove('hidden');
+                        bulkFailed.textContent = '실패: ' + failed.join(' / ');
+                    }
+                    evalBtn.textContent = '전체 평가 실행';
+                    evalBtn.disabled = false;
                     loadCreators();
                 }
             }

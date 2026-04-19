@@ -17,6 +17,7 @@ _batch_status: dict = {
     "done": 0,
     "current": None,
     "started_at": None,
+    "failed": [],
 }
 
 
@@ -41,6 +42,7 @@ def run_all_evaluations():
         "done": 0,
         "current": None,
         "started_at": datetime.now(timezone.utc).isoformat(),
+        "failed": [],
     }
     logger.info(f"스케줄 실행: {len(creators)}개 크리에이터 평가 시작")
 
@@ -59,6 +61,7 @@ def run_all_evaluations():
                 except Exception as e:
                     logger.error(f"  [{name}] 평가 실패: {e}")
                     failed.append(name)
+                    _batch_status["failed"].append(name)
                 finally:
                     _batch_status["done"] += 1
                     _batch_status["current"] = name
