@@ -13,6 +13,7 @@ from backend.config import settings
 from backend.schemas.sentiment import SentimentSummary, NotableComment
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 _MAX_RETRIES = 2
 _BACKOFF = [2, 4]
@@ -187,12 +188,19 @@ def _analyze_batch(comments: list[str], channel_name: str) -> dict | None:
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
-            result = _parse_json_response(response.text or "")
-            return result if result else None
+            raw_text = response.text or ""
+            logger.info(
+                f"[Gemini 배치 응답] 댓글 {len(comments)}개 | 시도 {attempt + 1} | "
+                f"응답 길이 {len(raw_text)}자\n{raw_text}"
+            )
+            result = _parse_json_response(raw_text)
+            if result:
+                return result
+            logger.warning(f"Gemini 배치 응답 JSON 파싱 실패 (시도 {attempt + 1}/{_MAX_RETRIES + 1})")
         except Exception as e:
             logger.warning(f"Gemini 배치 분석 실패 (시도 {attempt + 1}/{_MAX_RETRIES + 1}): {e}")
-            if attempt < _MAX_RETRIES:
-                time.sleep(_BACKOFF[attempt])
+        if attempt < _MAX_RETRIES:
+            time.sleep(_BACKOFF[attempt])
     return None
 
 
@@ -205,7 +213,7 @@ def _generate_overall_sentiment(
     themes: list[str],
     notable: list[NotableComment],
 ) -> str:
-    """집계된 전체 분류 결과로 한 문장 요약을 생성한다. 실패 시 결정론적 폴백."""
+    """집계된 전체 분류 결과로 두 문장 요약을 생성한다. 실패 시 결정론적 폴백."""
     client = _get_client()
 
     themes_text = ", ".join(themes) if themes else "없음"
@@ -226,7 +234,7 @@ def _generate_overall_sentiment(
 대표 댓글:
 {notable_text}
 
-위 집계를 바탕으로 전체 시청자 반응을 한국어 한 문장으로 요약해주세요.
+위 집계를 바탕으로 전체 시청자 반응을 한국어 두 문장으로 요약해주세요.
 요약 문장만 출력하고, 다른 부연 설명이나 마크다운은 포함하지 마세요.
 """
 
@@ -236,14 +244,21 @@ def _generate_overall_sentiment(
                 model="gemini-2.5-flash",
                 contents=prompt,
             )
-            text = (response.text or "").strip()
+            raw_text = response.text or ""
+            logger.info(
+                f"[Gemini 전체 요약 응답] 시도 {attempt + 1} | "
+                f"응답 길이 {len(raw_text)}자\n{raw_text}"
+            )
+            text = raw_text.strip()
             if text:
                 return text
+            logger.warning(f"Gemini 전체 요약 응답 비어있음 (시도 {attempt + 1}/{_MAX_RETRIES + 1})")
         except Exception as e:
             logger.warning(f"Gemini 전체 요약 생성 실패 (시도 {attempt + 1}/{_MAX_RETRIES + 1}): {e}")
-            if attempt < _MAX_RETRIES:
-                time.sleep(_BACKOFF[attempt])
+        if attempt < _MAX_RETRIES:
+            time.sleep(_BACKOFF[attempt])
 
+    logger.warning("[Gemini 전체 요약] 결정론적 폴백 사용")
     return (
         f"댓글 {total}개 중 긍정 {positive_count}개, 부정 {negative_count}개, "
         f"중립 {neutral_count}개로 분석되었습니다."
@@ -283,11 +298,20 @@ def generate_evaluation_summary(
                 model="gemini-3-flash-preview",
                 contents=prompt,
             )
-            return (response.text or "").strip() or "평가 요약 생성에 실패했습니다."
+            raw_text = response.text or ""
+            logger.info(
+                f"[Gemini 평가 요약 응답] 시도 {attempt + 1} | "
+                f"응답 길이 {len(raw_text)}자\n{raw_text}"
+            )
+            text = raw_text.strip()
+            if text:
+                return text
+            logger.warning(f"Gemini 평가 요약 응답 비어있음 (시도 {attempt + 1}/{_MAX_RETRIES + 1})")
         except Exception as e:
             logger.warning(f"Gemini 요약 생성 실패 (시도 {attempt + 1}/{_MAX_RETRIES + 1}): {e}")
-            if attempt < _MAX_RETRIES:
-                time.sleep(_BACKOFF[attempt])
+        if attempt < _MAX_RETRIES:
+            time.sleep(_BACKOFF[attempt])
+    logger.warning("[Gemini 평가 요약] 최종 실패 — 폴백 메시지 반환")
     return "평가 요약 생성에 실패했습니다."
 
 
