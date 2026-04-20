@@ -8,7 +8,7 @@ from backend.database import get_all_creators, get_schedule, update_schedule_las
 
 logger = logging.getLogger(__name__)
 
-scheduler = BackgroundScheduler()
+scheduler = BackgroundScheduler(timezone="Asia/Seoul")
 JOB_ID = "auto_evaluate_all"
 
 _batch_status: dict = {
@@ -109,7 +109,8 @@ def _apply_schedule(cron_expression: str):
 
     minute, hour, day, month, day_of_week = parts
     trigger = CronTrigger(
-        minute=minute, hour=hour, day=day, month=month, day_of_week=day_of_week
+        minute=minute, hour=hour, day=day, month=month, day_of_week=day_of_week,
+        timezone="Asia/Seoul",
     )
     scheduler.add_job(
         run_all_evaluations,
