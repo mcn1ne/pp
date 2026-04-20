@@ -1,4 +1,5 @@
 import logging
+import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler()
 JOB_ID = "auto_evaluate_all"
 
+_batch_lock = threading.Lock()
 _batch_status: dict = {
     "running": False,
     "total": 0,
@@ -22,32 +24,45 @@ _batch_status: dict = {
 
 
 def get_batch_status() -> dict:
-    return dict(_batch_status)
+    with _batch_lock:
+        return {**_batch_status, "failed": list(_batch_status["failed"])}
+
+
+def claim_batch() -> bool:
+    """실행중이 아니면 running=True 로 원자적 선점.
+
+    True 반환 → 호출자가 배치를 시작해야 함.
+    False 반환 → 이미 실행중 (호출자는 409 반환 등).
+    """
+    with _batch_lock:
+        if _batch_status["running"]:
+            return False
+        _batch_status["running"] = True
+        _batch_status["total"] = 0
+        _batch_status["done"] = 0
+        _batch_status["current"] = None
+        _batch_status["started_at"] = datetime.now(timezone.utc).isoformat()
+        _batch_status["failed"] = []
+    return True
 
 
 def run_all_evaluations():
-    """등록된 모든 크리에이터를 병렬 평가한다."""
-    global _batch_status
+    """등록된 모든 크리에이터를 병렬 평가한다. POST 경로는 이미 claim 된 상태로 진입.
+    스케줄러 cron 경로는 여기서 직접 claim 한다."""
+    if not _batch_status["running"]:
+        if not claim_batch():
+            logger.warning("이전 배치 실행이 아직 진행 중입니다. 중복 실행을 건너뜁니다.")
+            return
 
-    if _batch_status["running"]:
-        logger.warning("이전 배치 실행이 아직 진행 중입니다. 중복 실행을 건너뜁니다.")
-        return
-
-    from backend.api.v1.endpoints.creators import run_evaluation
-
-    creators = get_all_creators()
-    _batch_status = {
-        "running": True,
-        "total": len(creators),
-        "done": 0,
-        "current": None,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "failed": [],
-    }
-    logger.info(f"스케줄 실행: {len(creators)}개 크리에이터 평가 시작")
-
-    failed = []
+    failed: list[str] = []
     try:
+        from backend.api.v1.endpoints.creators import run_evaluation
+
+        creators = get_all_creators()
+        with _batch_lock:
+            _batch_status["total"] = len(creators)
+        logger.info(f"배치 실행: {len(creators)}개 크리에이터 평가 시작")
+
         with ThreadPoolExecutor(max_workers=3) as executor:
             future_to_creator = {
                 executor.submit(run_evaluation, c): c for c in creators
@@ -61,17 +76,20 @@ def run_all_evaluations():
                 except Exception as e:
                     logger.error(f"  [{name}] 평가 실패: {e}")
                     failed.append(name)
-                    _batch_status["failed"].append(name)
+                    with _batch_lock:
+                        _batch_status["failed"].append(name)
                 finally:
-                    _batch_status["done"] += 1
-                    _batch_status["current"] = name
-    finally:
-        _batch_status["running"] = False
-        _batch_status["current"] = None
-        update_schedule_last_run()
+                    with _batch_lock:
+                        _batch_status["done"] += 1
+                        _batch_status["current"] = name
+        logger.info(f"배치 실행 완료 (성공 {len(creators) - len(failed)}/{len(creators)})")
         if failed:
             logger.warning(f"실패한 크리에이터 ({len(failed)}건): {', '.join(failed)}")
-        logger.info(f"스케줄 실행 완료 (성공 {len(creators) - len(failed)}/{len(creators)})")
+    finally:
+        with _batch_lock:
+            _batch_status["running"] = False
+            _batch_status["current"] = None
+        update_schedule_last_run()
 
 
 def start_scheduler():

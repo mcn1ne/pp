@@ -177,6 +177,58 @@ def get_video_comments(video_id: str, max_results: int = 20) -> list[str]:
     return comments
 
 
+def get_new_comments_since(
+    video_id: str,
+    since_comment_id: str | None,
+    max_pages: int = 10,
+) -> list[dict]:
+    """영상의 최신 댓글을 order=time 순으로 페이지네이션한다.
+
+    since_comment_id 를 만나면 그 지점에서 즉시 중단해 새 댓글 델타만 반환한다.
+    since_comment_id 가 None 이면 최초 캐시 빌드이므로 max_pages * 100 개까지 수집.
+    반환은 최신순 `[{"id", "text"}, ...]`.
+    """
+    youtube = _get_youtube()
+    collected: list[dict] = []
+    next_page_token = None
+    page = 0
+
+    while page < max_pages:
+        try:
+            response = youtube.commentThreads().list(
+                part="snippet",
+                videoId=video_id,
+                order="time",
+                textFormat="plainText",
+                maxResults=100,
+                pageToken=next_page_token,
+            ).execute()
+        except Exception:
+            break
+
+        stop = False
+        for item in response.get("items", []):
+            top = item["snippet"]["topLevelComment"]
+            cid = top["id"]
+            if since_comment_id and cid == since_comment_id:
+                stop = True
+                break
+            collected.append({
+                "id": cid,
+                "text": top["snippet"]["textDisplay"],
+            })
+
+        if stop:
+            break
+
+        next_page_token = response.get("nextPageToken")
+        if not next_page_token:
+            break
+        page += 1
+
+    return collected
+
+
 def get_all_video_comments(video_id: str, max_pages: int = 10) -> list[str]:
     """영상의 모든 댓글을 페이지네이션으로 수집한다. (최대 max_pages 페이지)"""
     youtube = _get_youtube()

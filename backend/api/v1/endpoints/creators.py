@@ -1,7 +1,6 @@
 import json
 import logging
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from googleapiclient.errors import HttpError
@@ -17,10 +16,12 @@ from backend.database import (
 from backend.config import settings
 from backend.services.channel_resolver import resolve_channel_id
 from backend.services.youtube_service import (
-    get_channel_info, get_recent_videos, get_all_video_comments,
+    get_channel_info, get_recent_videos,
     filter_supercent_videos, split_supercent_videos,
 )
-from backend.services.gemini_service import analyze_comments, generate_evaluation_summary
+from backend.services.gemini_service import (
+    analyze_creator_videos, generate_evaluation_summary,
+)
 from backend.services.scoring_service import calculate_scores
 from backend.services.vision_filter import classify_by_thumbnail
 from backend.schemas.evaluation import EvaluationResult
@@ -93,13 +94,13 @@ async def creator_latest_result(creator_id: int):
 def evaluate_all_creators():
     """등록된 모든 크리에이터를 백그라운드에서 일괄 평가한다.
 
-    스케줄 실행과 동일한 `run_all_evaluations()` 경로를 재사용한다.
+    `claim_batch()` 로 running=True 를 원자적으로 선점한 뒤 스레드를 시작한다.
+    POST 반환 시점에 상태가 이미 확정되어 있어야 프런트 폴링이 중간 완료로 오판하지 않는다.
     진행 상태는 `GET /api/v1/schedule/status` 로 폴링한다.
     """
-    from backend.scheduler import run_all_evaluations, get_batch_status
+    from backend.scheduler import claim_batch, run_all_evaluations
 
-    status = get_batch_status()
-    if status.get("running"):
+    if not claim_batch():
         raise HTTPException(status_code=409, detail="이미 일괄 평가가 진행 중입니다.")
 
     thread = threading.Thread(target=run_all_evaluations, daemon=True)
@@ -159,13 +160,11 @@ def run_evaluation(creator: dict) -> dict:
         sc_videos = []
         target_videos = video_list.videos
 
-    all_comments = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {executor.submit(get_all_video_comments, v.video_id, 10): v for v in target_videos}
-        for future in futures:
-            all_comments.extend(future.result())
-
-    sentiment = analyze_comments(all_comments, channel.title)
+    sentiment = analyze_creator_videos(
+        creator_id=creator["id"],
+        target_videos=target_videos,
+        channel_name=channel.title,
+    )
 
     breakdown, composite, recommendation = calculate_scores(
         channel.subscriber_count, video_list, sentiment
@@ -187,7 +186,7 @@ def run_evaluation(creator: dict) -> dict:
         channel=channel,
         videos=video_list,
         supercent_video_count=sc_count,
-        total_comments_analyzed=len(all_comments),
+        total_comments_analyzed=sentiment.analyzed_count,
         supercent_filter_active=supercent_filter,
         used_fallback=supercent_filter and sc_count == 0,
         sentiment=sentiment,

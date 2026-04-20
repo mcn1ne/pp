@@ -32,6 +32,11 @@ BATCH_SIZE = 100  # 배치당 댓글 수
 # 배치 동시 처리 수 (Gemini RPM 한도에 따라 조정). 환경변수로 덮어쓰기 가능.
 BATCH_CONCURRENCY = max(1, int(os.environ.get("GEMINI_BATCH_CONCURRENCY", "3")))
 
+# 분류 프롬프트가 바뀌면 이 값을 올려 캐시를 전면 무효화한다.
+_PROMPT_VERSION = 1
+# 영상별 notable 후보 상한 (메모리/저장 용량 제한)
+_NOTABLE_PER_VIDEO_CAP = 10
+
 
 def analyze_comments(comments: list[str], channel_name: str) -> SentimentSummary:
     """Gemini API로 댓글 감성분석을 수행한다.
@@ -98,10 +103,11 @@ def analyze_comments(comments: list[str], channel_name: str) -> SentimentSummary
     # 테마는 모든 배치에서 합쳐서 중복 제거 후 상위 5개
     unique_themes = list(dict.fromkeys(all_themes))[:5]
 
-    # 감정별로 주목할 댓글 선별: 긍정 2, 부정 2, 중립 1
-    positive_comments = [c for c in all_notable if c["sentiment"] == "positive"][:2]
-    negative_comments = [c for c in all_notable if c["sentiment"] == "negative"][:2]
-    neutral_comments = [c for c in all_notable if c["sentiment"] == "neutral"][:1]
+    # 감정별로 주목할 댓글 선별: 긍정 2, 부정 2, 중립 1 (text 기준 중복 제거 후)
+    deduped_notable = _dedupe_notable(all_notable)
+    positive_comments = [c for c in deduped_notable if c["sentiment"] == "positive"][:2]
+    negative_comments = [c for c in deduped_notable if c["sentiment"] == "negative"][:2]
+    neutral_comments = [c for c in deduped_notable if c["sentiment"] == "neutral"][:1]
     selected_comments = [
         NotableComment(text=c["text"], sentiment=c["sentiment"])
         for c in positive_comments + negative_comments + neutral_comments
@@ -127,6 +133,213 @@ def analyze_comments(comments: list[str], channel_name: str) -> SentimentSummary
         overall_sentiment=overall,
         analyzed_count=len(comments),
     )
+
+
+def analyze_creator_videos(
+    creator_id: int,
+    target_videos,
+    channel_name: str,
+) -> SentimentSummary:
+    """영상별 캐시를 활용한 증분 감성 분석.
+
+    Flow:
+      1. 영상마다 video_analyses 캐시 조회
+      2. (prompt_version 일치 + 댓글 수 변화 없음) → 캐시 재사용
+      3. 아니면 order=time 델타 수집 → Gemini 배치 분류 → 기존 카운트에 누적
+      4. 영상별 집계를 합산해 전체 SentimentSummary 생성
+    """
+    from backend.database import get_video_analysis, upsert_video_analysis
+    from backend.services.youtube_service import get_new_comments_since
+
+    agg_positive = 0
+    agg_negative = 0
+    agg_neutral = 0
+    agg_themes: list[str] = []
+    agg_notable: list[dict] = []
+    agg_total_comments = 0
+
+    for video in target_videos:
+        existing = get_video_analysis(creator_id, video.video_id)
+        existing_version = existing["prompt_version"] if existing else None
+        cache_valid = (
+            existing is not None
+            and existing_version == _PROMPT_VERSION
+        )
+
+        # 스킵 조건: 캐시 유효 AND 유튜브상 댓글 수 변화 없음
+        if cache_valid and video.comment_count <= (existing["total_comments_analyzed"] or 0):
+            _accumulate_from_row(
+                existing, agg_themes, agg_notable,
+            )
+            agg_positive += existing["positive_count"] or 0
+            agg_negative += existing["negative_count"] or 0
+            agg_neutral += existing["neutral_count"] or 0
+            agg_total_comments += existing["total_comments_analyzed"] or 0
+            continue
+
+        # 델타 수집
+        since_cid = existing["last_seen_comment_id"] if cache_valid else None
+        try:
+            delta = get_new_comments_since(video.video_id, since_cid)
+        except Exception as e:
+            logger.warning(f"[{video.video_id}] 댓글 수집 실패: {e}")
+            delta = []
+
+        # 기존 카운트·테마·notable 로드 (캐시 무효면 0/빈 배열에서 시작)
+        pos = existing["positive_count"] if cache_valid else 0
+        neg = existing["negative_count"] if cache_valid else 0
+        neu = existing["neutral_count"] if cache_valid else 0
+        themes = _load_json_list(existing, "themes") if cache_valid else []
+        notable = _load_json_list(existing, "notable_candidates") if cache_valid else []
+        total_analyzed = (existing["total_comments_analyzed"] or 0) if cache_valid else 0
+        new_last_cid = since_cid
+
+        batch_partial_failure = False
+        if delta:
+            texts = [c["text"] for c in delta]
+            batches = [texts[i:i + BATCH_SIZE] for i in range(0, len(texts), BATCH_SIZE)]
+            workers = min(BATCH_CONCURRENCY, len(batches))
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                batch_results = list(
+                    executor.map(lambda b: _analyze_batch(b, channel_name), batches)
+                )
+
+            if any(r is None for r in batch_results):
+                # 배치 중 하나라도 실패하면 커서 전진·카운트 누적을 모두 포기한다.
+                # 기존 캐시 값으로 집계하고, 다음 실행에서 델타 전체가 재시도되도록 둔다.
+                batch_partial_failure = True
+                logger.warning(
+                    f"[{video.video_id}] 배치 {sum(1 for r in batch_results if r is None)}"
+                    f"/{len(batch_results)} 실패 — 캐시 갱신 건너뜀"
+                )
+            else:
+                # 모든 배치 성공: 최신 댓글 ID 로 커서 전진
+                new_last_cid = delta[0]["id"]
+                for res, batch in zip(batch_results, batches):
+                    labels = _normalize_labels(res.get("sentiments", []), len(batch))
+                    c = Counter(labels)
+                    pos += c.get("positive", 0)
+                    neg += c.get("negative", 0)
+                    neu += c.get("neutral", 0)
+                    total_analyzed += len(batch)
+                    for t in res.get("key_themes", []):
+                        if t and t not in themes:
+                            themes.append(t)
+                    for nc in res.get("notable_comments", []):
+                        if (isinstance(nc, dict) and "text" in nc
+                                and nc.get("sentiment") in _VALID_LABELS):
+                            notable.append({"text": nc["text"], "sentiment": nc["sentiment"]})
+
+        # 영상당 notable 상한 유지 (감정별로 고르게, text 중복 제거)
+        themes = themes[:10]
+        notable = _cap_notable(_dedupe_notable(notable), _NOTABLE_PER_VIDEO_CAP)
+
+        if not batch_partial_failure:
+            upsert_video_analysis(
+                creator_id=creator_id,
+                video_id=video.video_id,
+                title=video.title,
+                published_at=video.published_at.isoformat() if video.published_at else None,
+                positive_count=pos,
+                negative_count=neg,
+                neutral_count=neu,
+                themes=themes,
+                notable_candidates=notable,
+                last_seen_comment_id=new_last_cid,
+                total_comments_analyzed=total_analyzed,
+                prompt_version=_PROMPT_VERSION,
+            )
+
+        agg_positive += pos
+        agg_negative += neg
+        agg_neutral += neu
+        agg_total_comments += total_analyzed
+        for t in themes:
+            if t not in agg_themes:
+                agg_themes.append(t)
+        agg_notable.extend(notable)
+
+    total = agg_positive + agg_negative + agg_neutral
+    if total == 0:
+        return SentimentSummary(
+            positive_ratio=0, negative_ratio=0, neutral_ratio=0,
+            key_themes=[], notable_comments=[], overall_sentiment="데이터 없음",
+            analyzed_count=agg_total_comments,
+        )
+
+    unique_themes = agg_themes[:5]
+    deduped_notable = _dedupe_notable(agg_notable)
+    positive_comments = [c for c in deduped_notable if c["sentiment"] == "positive"][:2]
+    negative_comments = [c for c in deduped_notable if c["sentiment"] == "negative"][:2]
+    neutral_comments = [c for c in deduped_notable if c["sentiment"] == "neutral"][:1]
+    selected_comments = [
+        NotableComment(text=c["text"], sentiment=c["sentiment"])
+        for c in positive_comments + negative_comments + neutral_comments
+    ]
+
+    overall = _generate_overall_sentiment(
+        channel_name=channel_name,
+        total=total,
+        positive_count=agg_positive,
+        negative_count=agg_negative,
+        neutral_count=agg_neutral,
+        themes=unique_themes,
+        notable=selected_comments,
+    )
+
+    return SentimentSummary(
+        positive_ratio=round(agg_positive / total, 3),
+        negative_ratio=round(agg_negative / total, 3),
+        neutral_ratio=round(agg_neutral / total, 3),
+        key_themes=unique_themes,
+        notable_comments=selected_comments,
+        overall_sentiment=overall,
+        analyzed_count=agg_total_comments,
+    )
+
+
+def _load_json_list(row: dict, key: str) -> list:
+    raw = row.get(key) if row else None
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+        return value if isinstance(value, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _dedupe_notable(items: list[dict]) -> list[dict]:
+    """text 기준 중복 제거. 먼저 등장한 (sentiment) 라벨이 유지된다."""
+    seen: set[str] = set()
+    out: list[dict] = []
+    for n in items:
+        text = (n.get("text") or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        out.append(n)
+    return out
+
+
+def _cap_notable(notable: list[dict], cap: int) -> list[dict]:
+    """감정별 균형을 유지하며 최대 cap 개로 자른다."""
+    if len(notable) <= cap:
+        return notable
+    per = max(1, cap // 3)
+    pos = [n for n in notable if n.get("sentiment") == "positive"][:per]
+    neg = [n for n in notable if n.get("sentiment") == "negative"][:per]
+    neu = [n for n in notable if n.get("sentiment") == "neutral"][:cap - len(pos) - len(neg)]
+    return pos + neg + neu
+
+
+def _accumulate_from_row(row: dict, themes: list[str], notable: list[dict]) -> None:
+    for t in _load_json_list(row, "themes"):
+        if t and t not in themes:
+            themes.append(t)
+    for nc in _load_json_list(row, "notable_candidates"):
+        if isinstance(nc, dict) and "text" in nc and nc.get("sentiment") in _VALID_LABELS:
+            notable.append({"text": nc["text"], "sentiment": nc["sentiment"]})
 
 
 def _normalize_labels(raw: list, expected_len: int) -> list[str]:

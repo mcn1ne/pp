@@ -64,6 +64,27 @@ def init_db():
             keyword TEXT NOT NULL UNIQUE,
             created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS video_analyses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            creator_id INTEGER NOT NULL,
+            video_id TEXT NOT NULL,
+            title TEXT,
+            published_at TEXT,
+            positive_count INTEGER DEFAULT 0,
+            negative_count INTEGER DEFAULT 0,
+            neutral_count INTEGER DEFAULT 0,
+            themes TEXT,
+            notable_candidates TEXT,
+            last_seen_comment_id TEXT,
+            total_comments_analyzed INTEGER DEFAULT 0,
+            prompt_version INTEGER DEFAULT 1,
+            last_analyzed_at TEXT,
+            UNIQUE(creator_id, video_id),
+            FOREIGN KEY (creator_id) REFERENCES creators(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_va_creator_published
+            ON video_analyses(creator_id, published_at);
     """)
 
     # 기본 스케줄이 없으면 생성 (매일 09:00)
@@ -257,3 +278,84 @@ def delete_keyword(keyword_id: int) -> bool:
     conn.commit()
     conn.close()
     return cursor.rowcount > 0
+
+
+# --- Video Analyses (per-video sentiment cache) ---
+
+def get_video_analysis(creator_id: int, video_id: str) -> dict | None:
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM video_analyses WHERE creator_id = ? AND video_id = ?",
+        (creator_id, video_id),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_video_analyses(creator_id: int, since_published_at: str | None = None) -> list[dict]:
+    conn = get_db()
+    if since_published_at:
+        rows = conn.execute(
+            "SELECT * FROM video_analyses WHERE creator_id = ? AND published_at >= ? "
+            "ORDER BY published_at DESC",
+            (creator_id, since_published_at),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM video_analyses WHERE creator_id = ? ORDER BY published_at DESC",
+            (creator_id,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def upsert_video_analysis(
+    creator_id: int,
+    video_id: str,
+    title: str | None,
+    published_at: str | None,
+    positive_count: int,
+    negative_count: int,
+    neutral_count: int,
+    themes: list[str],
+    notable_candidates: list[dict],
+    last_seen_comment_id: str | None,
+    total_comments_analyzed: int,
+    prompt_version: int,
+) -> None:
+    conn = get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        conn.execute(
+            """
+            INSERT INTO video_analyses (
+                creator_id, video_id, title, published_at,
+                positive_count, negative_count, neutral_count,
+                themes, notable_candidates, last_seen_comment_id,
+                total_comments_analyzed, prompt_version, last_analyzed_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(creator_id, video_id) DO UPDATE SET
+                title = excluded.title,
+                published_at = excluded.published_at,
+                positive_count = excluded.positive_count,
+                negative_count = excluded.negative_count,
+                neutral_count = excluded.neutral_count,
+                themes = excluded.themes,
+                notable_candidates = excluded.notable_candidates,
+                last_seen_comment_id = excluded.last_seen_comment_id,
+                total_comments_analyzed = excluded.total_comments_analyzed,
+                prompt_version = excluded.prompt_version,
+                last_analyzed_at = excluded.last_analyzed_at
+            """,
+            (
+                creator_id, video_id, title, published_at,
+                positive_count, negative_count, neutral_count,
+                json.dumps(themes, ensure_ascii=False),
+                json.dumps(notable_candidates, ensure_ascii=False),
+                last_seen_comment_id,
+                total_comments_analyzed, prompt_version, now,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
